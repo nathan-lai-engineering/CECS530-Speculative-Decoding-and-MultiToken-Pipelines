@@ -1,5 +1,7 @@
 import time
 import torch
+from tqdm import tqdm, trange
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # maintained by nathan feel free to edit
@@ -36,7 +38,7 @@ class BaselineDecoder:
         eos_id = self.tokenizer.eos_token_id
 
         # k passes 
-        for _ in range(k):
+        for _ in trange(k, desc="Performing forward passes"):
             start_time = time.time()
 
             next_token = self.forward(tokens)
@@ -46,7 +48,7 @@ class BaselineDecoder:
 
             # update those metrics
             elapsed_time = time.time() - start_time
-            self.token_time += elapsed_time
+            self.total_time += elapsed_time
             self.total_tokens += 1
             self.max_time_per_token = max(self.max_time_per_token, elapsed_time)
             self.min_time_per_token = min(self.min_time_per_token, elapsed_time)
@@ -85,3 +87,13 @@ class BaselineDecoder:
                 "max_time_per_token": 0, 
                 "min_time_per_token": float('inf')
             }
+        
+    # string to input_ids
+    def encode(self, text):
+        return self.tokenizer.encode(text, return_tensors="pt").to(
+            next(self.model.parameters()).device
+        )
+
+    # token_ids to string
+    def decode(self, token_ids):
+        return self.tokenizer.decode(token_ids[0], skip_special_tokens=True)

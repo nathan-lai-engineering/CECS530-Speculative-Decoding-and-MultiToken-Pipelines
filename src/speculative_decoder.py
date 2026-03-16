@@ -28,8 +28,8 @@ class SpeculativeDecoder:
             verified_tokens = self.parallel_verification(draft_ids, draft_probs, k=k)
             
             # Update prompt and remaining n
+            current_n = verified_tokens.shape[-1] - self.encode(current_prompt).shape[-1]
             current_prompt = self.decode(verified_tokens)
-            current_n -= verified_tokens.shape[-1] - self.encode(current_prompt).shape[-1]
             print(current_n)
 
         return verified_tokens

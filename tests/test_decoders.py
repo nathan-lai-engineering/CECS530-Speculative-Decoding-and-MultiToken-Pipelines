@@ -19,7 +19,6 @@ def predict(prompt, model_path, n, type="baseline", target_path=None, k=5):
             target = target_path if target_path is not None else model_path
 
             decoder = SpeculativeDecoder(model_path, target)
-            input_ids = decoder.encode(prompt)
             output_ids = decoder.generate_k_tokens(prompt, n, k=k)
             output_text = decoder.decode(output_ids)
             metrics = decoder.token_throughput()
@@ -27,9 +26,6 @@ def predict(prompt, model_path, n, type="baseline", target_path=None, k=5):
         case _:
             output_text, metrics = None, None
     return output_text, metrics
-
-
-
 
 prompt = "Speculative decoding is"
 

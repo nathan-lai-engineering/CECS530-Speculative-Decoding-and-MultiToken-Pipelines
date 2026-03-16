@@ -15,16 +15,21 @@ class SpeculativeDecoder:
         self.draft_model.eval()
         self.target_model.eval()
 
+        self.accepted_tokens = 0
+        self.total_draft_tokens = 0
+
     def generate_k_tokens(self, prompt, n=20, k=5):
+        print(f"Is CUDA available? {torch.cuda.is_available()}")
         current_n = n
         current_ids = self.draft_tokenizer(prompt, return_tensors="pt")["input_ids"]
+        current_k = k
         eos_id = self.draft_tokenizer.eos_token_id
 
 
         # keep running batches of k until we have n tokens
         while(current_n > 0):
             # Generate k draft tokens
-            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=min(current_n, k))
+            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=min(current_n, current_k))
 
             # Verify tokens in parallel
             verified_tokens = self.parallel_verification(draft_ids, draft_probs)
@@ -36,6 +41,14 @@ class SpeculativeDecoder:
             current_n -= verified_tokens.shape[-1] - current_ids.shape[-1]
             print(current_n)
             current_ids = verified_tokens
+
+            # adaptive speculative depth, increase draft tokens as we increase confidence
+            acceptance_rate = self.accepted_tokens / self.total_draft_tokens
+            print("acceptance rate", acceptance_rate, self.total_draft_tokens, self.accepted_tokens)
+            if acceptance_rate < 0.6:
+                current_k = max(2, k / 2)
+            elif acceptance_rate > 0.85:
+                current_k = min(8, k + 2)
 
             if eos_id is not None and eos_id in verified_tokens:
                 break
@@ -62,6 +75,8 @@ class SpeculativeDecoder:
                 # Add new tokens into draft tokens
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
                 draft_token_probs.append(probs.squeeze(0)[token.item()])
+
+                self.total_draft_tokens += 1
 
                 if eos_id is not None and token.item() == eos_id:
                     break
@@ -94,9 +109,6 @@ class SpeculativeDecoder:
                     if eos_id is not None and index == eos_id:
                         return draft_tokens
 
-                    # Accept token into sequence
-                    continue
-
                 else:
                     # Rollback behavior
                     draft_tokens = draft_tokens[0][:-i]
@@ -111,6 +123,8 @@ class SpeculativeDecoder:
                     if eos_id is not None and correct_token.item() == eos_id:
                         return draft_tokens 
                     break
+
+                self.accepted_tokens += 1
 
         return draft_tokens
 

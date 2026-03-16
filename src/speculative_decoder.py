@@ -24,7 +24,7 @@ class SpeculativeDecoder:
         # keep running batches of k until we have n tokens
         while(current_n > 0):
             # Generate k draft tokens
-            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=max(current_n, k))
+            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=min(current_n, k))
 
             # Verify tokens in parallel
             verified_tokens = self.parallel_verification(draft_ids, draft_probs)
@@ -111,17 +111,6 @@ class SpeculativeDecoder:
                     if eos_id is not None and correct_token.item() == eos_id:
                         return draft_tokens 
                     break
-        
-        
-        # accepting bonus token after a full k depth is reached
-        '''
-        bonus = target_token_probs[0][-1].argmax(dim=-1, keepdim=True)
-        if eos_id is not None and bonus.item() == eos_id:
-            return draft_tokens
-        if draft_tokens.dim() == 1:
-            draft_tokens = draft_tokens.unsqueeze(0)
-        draft_tokens = torch.cat([draft_tokens, bonus.unsqueeze(0)], dim=-1)    
-        '''
 
         return draft_tokens
 

@@ -4,11 +4,13 @@ from tqdm import tqdm, trange
 
 class SpeculativeDecoder:
     def __init__(self, draft_model_path, target_model_path):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
         self.draft_model_path = draft_model_path
         self.target_model_path = target_model_path
 
-        self.draft_model = AutoModelForCausalLM.from_pretrained(draft_model_path, torch_dtype=torch.float16)
-        self.target_model = AutoModelForCausalLM.from_pretrained(target_model_path, torch_dtype=torch.float16)
+        self.draft_model = AutoModelForCausalLM.from_pretrained(draft_model_path, torch_dtype=torch.float16).to(self.device)
+        self.target_model = AutoModelForCausalLM.from_pretrained(target_model_path, torch_dtype=torch.float16).to(self.device)
         self.draft_tokenizer = AutoTokenizer.from_pretrained(draft_model_path)
         self.target_tokenizer = AutoTokenizer.from_pretrained(target_model_path)
 
@@ -21,7 +23,7 @@ class SpeculativeDecoder:
     def generate_k_tokens(self, prompt, n=20, k=5):
         print(f"Is CUDA available? {torch.cuda.is_available()}")
         current_n = n
-        current_ids = self.draft_tokenizer(prompt, return_tensors="pt")["input_ids"]
+        current_ids = self.draft_tokenizer(prompt, return_tensors="pt")["input_ids"].to(self.device)
         current_k = k
         eos_id = self.draft_tokenizer.eos_token_id
 
@@ -44,11 +46,11 @@ class SpeculativeDecoder:
 
             # adaptive speculative depth, increase draft tokens as we increase confidence
             acceptance_rate = self.accepted_tokens / self.total_draft_tokens
-            print("acceptance rate", acceptance_rate, self.total_draft_tokens, self.accepted_tokens)
+            #print("acceptance rate", acceptance_rate, self.total_draft_tokens, self.accepted_tokens)
             if acceptance_rate < 0.6:
-                current_k = max(2, k / 2)
+                current_k = int(max(2, k / 2))
             elif acceptance_rate > 0.85:
-                current_k = min(8, k + 2)
+                current_k = int(min(8, k + 2))
 
             if eos_id is not None and eos_id in verified_tokens:
                 break
@@ -108,6 +110,8 @@ class SpeculativeDecoder:
                     # early stopping
                     if eos_id is not None and index == eos_id:
                         return draft_tokens
+                
+                    self.accepted_tokens += 1
 
                 else:
                     # Rollback behavior
@@ -124,7 +128,6 @@ class SpeculativeDecoder:
                         return draft_tokens 
                     break
 
-                self.accepted_tokens += 1
 
         return draft_tokens
 

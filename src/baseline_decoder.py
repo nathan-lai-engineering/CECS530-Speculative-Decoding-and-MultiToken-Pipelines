@@ -9,6 +9,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 class BaselineDecoder:
 
     def __init__(self, model_path):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # so you can choose big model or small model
         self.model_path = model_path 
@@ -18,7 +19,7 @@ class BaselineDecoder:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype=torch.float16
-        )
+        ).to(self.device)
         self.model.eval()
 
 

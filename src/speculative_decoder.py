@@ -18,6 +18,8 @@ class SpeculativeDecoder:
     def generate_k_tokens(self, prompt, n=20, k=5):
         current_n = n
         current_prompt = prompt
+
+        # keep running batches of k until we have n tokens
         while(current_n > 0):
             # Generate k draft tokens
             draft_ids, draft_probs = self.generate_k_draft_tokens(current_prompt, k=k)
@@ -25,9 +27,10 @@ class SpeculativeDecoder:
             # Verify tokens in parallel
             verified_tokens = self.parallel_verification(draft_ids, draft_probs, k=k)
             
-            # Update prompt and remaining k
+            # Update prompt and remaining n
             current_prompt = self.decode(verified_tokens)
-            current_n -= verified_tokens.shape[-1] - self.encode(prompt).shape[-1]
+            current_n -= verified_tokens.shape[-1] - self.encode(current_prompt).shape[-1]
+            print(current_n)
 
         return verified_tokens
 

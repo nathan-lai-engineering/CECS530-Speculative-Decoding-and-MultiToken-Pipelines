@@ -35,8 +35,8 @@ prompt = "Speculative decoding is"
 
 print("Starting predictions on prompt:", prompt)
 
-output1, metrics1 = predict(prompt, "./models/tinyllama-1.1b", 20)
-output2, metrics2 = predict(prompt, "./models/llama2-7b", 20)
+#output1, metrics1 = predict(prompt, "./models/tinyllama-1.1b", 20)
+#output2, metrics2 = predict(prompt, "./models/llama2-7b", 20)
 output3, metrics3 = predict(prompt, "./models/tinyllama-1.1b", 20, type="speculative", target_path="./models/llama2-7b")
 
 

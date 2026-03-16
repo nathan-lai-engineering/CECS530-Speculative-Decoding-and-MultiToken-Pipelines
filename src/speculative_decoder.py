@@ -17,30 +17,36 @@ class SpeculativeDecoder:
 
     def generate_k_tokens(self, prompt, n=20, k=5):
         current_n = n
-        current_prompt = prompt
+        current_ids = self.draft_tokenizer(prompt, return_tensors="pt")["input_ids"]
+        eos_id = self.draft_tokenizer.eos_token_id
+
 
         # keep running batches of k until we have n tokens
         while(current_n > 0):
             # Generate k draft tokens
-            draft_ids, draft_probs = self.generate_k_draft_tokens(current_prompt, k=k)
-            
+            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=max(current_n, k))
+
             # Verify tokens in parallel
-            verified_tokens = self.parallel_verification(draft_ids, draft_probs, k=k)
+            verified_tokens = self.parallel_verification(draft_ids, draft_probs)
             
+            if verified_tokens.dim() == 1:
+                verified_tokens = verified_tokens.unsqueeze(0)
+
             # Update prompt and remaining n
-            current_n = verified_tokens.shape[-1] - self.encode(current_prompt).shape[-1]
-            current_prompt = self.decode(verified_tokens)
+            current_n -= verified_tokens.shape[-1] - current_ids.shape[-1]
             print(current_n)
+            current_ids = verified_tokens
+
+            if eos_id is not None and eos_id in verified_tokens:
+                break
 
         return verified_tokens
 
-    def generate_k_draft_tokens(self, prompt, k):
-        # Tokenize input prompt
-        tokenized_inputs = self.draft_tokenizer(prompt, return_tensors="pt")
-
+    def generate_k_draft_tokens(self, input_ids, k):
         # As model generates draft tokens, it is added into draft inputs
-        draft_tokens = tokenized_inputs["input_ids"].clone()
+        draft_tokens = input_ids.clone()
         draft_token_probs = []
+        eos_id = self.draft_tokenizer.eos_token_id
 
         for _ in trange(k, desc="Generating draft tokens"):
             with torch.no_grad():
@@ -57,9 +63,15 @@ class SpeculativeDecoder:
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
                 draft_token_probs.append(probs.squeeze(0)[token.item()])
 
+                if eos_id is not None and token.item() == eos_id:
+                    break
+
         return draft_tokens, draft_token_probs
 
-    def parallel_verification(self, draft_tokens, draft_token_probs, k):
+    def parallel_verification(self, draft_tokens, draft_token_probs):
+        eos_id = self.target_tokenizer.eos_token_id
+        k = len(draft_token_probs)
+
         print("Verifying", k, "draft tokens")
         with torch.no_grad():
 
@@ -77,6 +89,11 @@ class SpeculativeDecoder:
                 draft_token_prob = draft_token_probs[-i].item()
 
                 if target_token_prob >= draft_token_prob:
+
+                    # early stopping
+                    if eos_id is not None and index == eos_id:
+                        return draft_tokens
+
                     # Accept token into sequence
                     continue
 
@@ -89,8 +106,23 @@ class SpeculativeDecoder:
 
                     # Add correct token into sequence
                     draft_tokens = torch.cat([draft_tokens, correct_token], dim=-1)
+                
+                    # early stopping
+                    if eos_id is not None and correct_token.item() == eos_id:
+                        return draft_tokens 
                     break
-            
+        
+        
+        # accepting bonus token after a full k depth is reached
+        '''
+        bonus = target_token_probs[0][-1].argmax(dim=-1, keepdim=True)
+        if eos_id is not None and bonus.item() == eos_id:
+            return draft_tokens
+        if draft_tokens.dim() == 1:
+            draft_tokens = draft_tokens.unsqueeze(0)
+        draft_tokens = torch.cat([draft_tokens, bonus.unsqueeze(0)], dim=-1)    
+        '''
+
         return draft_tokens
 
     # string to input_ids

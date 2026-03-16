@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
+from tqdm import tqdm, trange
 
 class SpeculativeDecoder:
     def __init__(self, draft_model_path, target_model_path):
@@ -22,7 +23,7 @@ class SpeculativeDecoder:
         draft_tokens = tokenized_inputs["input_ids"].clone()
         draft_token_probs = []
 
-        for _ in range(k):
+        for _ in trange(k, desc="Generating draft tokens"):
             with torch.no_grad():
                 # Pass tokenized input to draft model
                 output = self.draft_model(draft_tokens)
@@ -48,7 +49,7 @@ class SpeculativeDecoder:
             target_token_probs = torch.softmax(output.logits, dim=-1)
 
             # Compare probability output of draft token from target model vs. draft model
-            for i in range(k, 0, -1):
+            for i in trange(k, 0, -1, desc="Performing target model verification"):
                 index = draft_tokens[0][-i].item()
                 
                 target_token_prob = target_token_probs[0][-i][index].item()
@@ -70,3 +71,19 @@ class SpeculativeDecoder:
                     break
             
         return draft_tokens
+
+    # string to input_ids
+    def encode(self, text):
+        return self.draft_tokenizer.encode(text, return_tensors="pt").to(
+            next(self.draft_model.parameters()).device
+        )
+
+    # token_ids to string
+    def decode(self, token_ids):
+        if token_ids.dim() == 1:
+            return self.target_tokenizer.decode(token_ids, skip_special_tokens=True)
+        return self.target_tokenizer.decode(token_ids[0], skip_special_tokens=True)
+
+    # placeholder — timing will be added in Week 3 benchmark
+    def token_throughput(self):
+        return {"note": "speculative throughput metrics coming in Week 3"}

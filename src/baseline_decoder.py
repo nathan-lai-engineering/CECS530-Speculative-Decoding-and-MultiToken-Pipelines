@@ -26,7 +26,7 @@ class BaselineDecoder:
 
     # generate k tokens with k forward passes
     # returns input tokens + k number of output tokens
-    def generate_k_tokens(self, input_ids, k):
+    def generate_k_tokens(self, input_ids, n):
 
         # reset the metrics for this generation
         self.total_tokens = 0
@@ -38,7 +38,7 @@ class BaselineDecoder:
         eos_id = self.tokenizer.eos_token_id
 
         # k passes 
-        for _ in trange(k, desc="Performing forward passes"):
+        for _ in trange(n, desc="Performing forward passes"):
             start_time = time.time()
 
             next_token = self.forward(tokens)

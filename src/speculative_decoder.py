@@ -146,8 +146,12 @@ class SpeculativeDecoder:
                 # we are accepting a token either way: from draft or bonus
                 self.output_tokens += 1
 
-                accept_prob = min(1.0, target_token_prob / draft_token_prob)
-                if torch.rand(1).item() < accept_prob:
+                target_greedy_token = target_token_probs[0][-(i+1)].argmax().item()
+                if target_greedy_token == index:
+
+
+                #accept_prob = min(1.0, target_token_prob / draft_token_prob)
+                #if torch.rand(1).item() < accept_prob:
                     self.accepted_tokens += 1
                     # early stopping
                     if eos_id is not None and index == eos_id:
@@ -157,7 +161,9 @@ class SpeculativeDecoder:
                     draft_tokens = draft_tokens[0][:-i]
 
                     # Sample from target token probabilities the correct word
-                    correct_token = torch.multinomial(target_token_probs[0][-(i+1)], num_samples=1)
+                    #correct_token = torch.multinomial(target_token_probs[0][-(i+1)], num_samples=1)
+                    correct_token = target_token_probs[0][-(i+1)].argmax().unsqueeze(0)
+
 
                     # Add correct token into sequence
                     draft_tokens = torch.cat([draft_tokens, correct_token], dim=-1)

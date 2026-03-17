@@ -6,7 +6,11 @@ from baseline_decoder import BaselineDecoder
 from speculative_decoder import SpeculativeDecoder
 
 
-def predict(prompt, model_path, n, type="baseline", target_path=None, k=5):
+# predict using either baseline or speculative method on given model
+def predict(prompt, model_path, n, type="baseline", target_path=None, k=None):
+    if k is None:
+        k = max(2, int(0.10 * n))
+
     match type:
         case "baseline":
             decoder = BaselineDecoder(model_path)
@@ -27,23 +31,23 @@ def predict(prompt, model_path, n, type="baseline", target_path=None, k=5):
             output_text, metrics = None, None
     return output_text, metrics
 
-prompt = "Speculative decoding is"
+prompt = "The definition of Speculative decoding in LLM models is"
 
 print("Starting predictions on prompt:", prompt)
 
-output1, metrics1 = predict(prompt, "./models/tinyllama-1.1b", 20)
-output2, metrics2 = predict(prompt, "./models/llama2-7b", 20)
-output3, metrics3 = predict(prompt, "./models/tinyllama-1.1b", 20, type="speculative", target_path="./models/llama2-7b")
+output1, metrics1 = predict(prompt, "./models/tinyllama-1.1b", 50)
+output2, metrics2 = predict(prompt, "./models/llama2-7b", 50)
+output3, metrics3 = predict(prompt, "./models/tinyllama-1.1b", 50, type="speculative", target_path="./models/llama2-7b")
 
 
-print("Llama2 7b - Baseline")
+print("Llama2 1.1b - Baseline")
 try:
     print(output1)
     print(metrics1)
 except NameError:
-    print("skipping Llama2 7b - Baseline")
+    print("skipping Llama2 1.1b - Baseline")
 
-print("Llama2 1.1b - Baseline")
+print("Llama2 7b - Baseline")
 try:
     print(output2)
     print(metrics2)

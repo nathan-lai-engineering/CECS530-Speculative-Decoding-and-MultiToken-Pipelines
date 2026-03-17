@@ -58,7 +58,7 @@ class SpeculativeDecoder:
         # keep running batches of k until we have n tokens
         while(current_n > 0):
             # Generate k draft tokens
-            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=min(current_n, current_k))
+            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=min(current_n - 1, current_k))
 
             # Verify tokens in parallel
             verified_tokens = self.parallel_verification(draft_ids, draft_probs, current_ids.shape[-1])
@@ -183,18 +183,11 @@ class SpeculativeDecoder:
                 for i in range(k, 0, -1):
                     index = draft_tokens[0][-i].item()
                     
-                    #target_token_prob = target_token_probs[0][-(i+1)][index].item()
-                    #draft_token_prob = draft_token_probs[-i].item()
-                    
                     # we are accepting a token either way: from draft or bonus
                     self.output_tokens += 1
 
                     target_greedy_token = target_token_probs[0][-(i+1)].argmax().item()
                     if target_greedy_token == index:
-
-
-                    #accept_prob = min(1.0, target_token_prob / draft_token_prob)
-                    #if torch.rand(1).item() < accept_prob:
                         self.accepted_tokens += 1
                         # early stopping
                         if eos_id is not None and index == eos_id:
@@ -204,7 +197,6 @@ class SpeculativeDecoder:
                         draft_tokens = draft_tokens[0][:-i]
 
                         # Sample from target token probabilities the correct word
-                        #correct_token = torch.multinomial(target_token_probs[0][-(i+1)], num_samples=1)
                         correct_token = target_token_probs[0][-(i+1)].argmax().unsqueeze(0)
 
                         # Add correct token into sequence

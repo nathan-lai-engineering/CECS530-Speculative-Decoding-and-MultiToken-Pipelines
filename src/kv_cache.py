@@ -9,34 +9,34 @@ class KVCache:
         self.speculative_tokens = []
 
     def add_speculative(self, tokens):
-        print(f"[Draft] Adding speculative tokens: {tokens}")
+        #print(f"[Draft] Adding speculative tokens: {tokens}")
         self.speculative_tokens.extend(tokens)
-        print(f"[State] Speculative = {self.speculative_tokens}\n")
+        #print(f"[State] Speculative = {self.speculative_tokens}\n")
 
     def verify(self, target_tokens):
-        print(f"[Verify] Target tokens: {target_tokens}")
+        #print(f"[Verify] Target tokens: {target_tokens}")
         accepted_tokens = []
 
         for i, (draft_token, target_token) in enumerate(zip(self.speculative_tokens, target_tokens)):
-            print(f"  Compare position {i}: draft={draft_token}, target={target_token}")
+            #print(f"  Compare position {i}: draft={draft_token}, target={target_token}")
             if draft_token == target_token:
                 accepted_tokens.append(draft_token)
             else:
-                print(f"  MISMATCH at position {i} -> stopping verification")
+                #print(f"  MISMATCH at position {i} -> stopping verification")
                 break
 
-        print(f"[Verify] Accepted prefix: {accepted_tokens}\n")
+        #print(f"[Verify] Accepted prefix: {accepted_tokens}\n")
         return accepted_tokens
 
     def commit(self, accepted_tokens):
-        print(f"[Commit] Committing tokens: {accepted_tokens}")
+        #print(f"[Commit] Committing tokens: {accepted_tokens}")
         self.committed_tokens.extend(accepted_tokens)
-        print(f"[State] Committed = {self.committed_tokens}\n")
+        #print(f"[State] Committed = {self.committed_tokens}\n")
 
     def rollback(self):
-        print(f"[Rollback] Clearing speculative tokens: {self.speculative_tokens}")
+        #print(f"[Rollback] Clearing speculative tokens: {self.speculative_tokens}")
         self.speculative_tokens = []
-        print(f"[State] Speculative cleared\n")
+        #print(f"[State] Speculative cleared\n")
 
     def get_state(self):
         return {

@@ -68,7 +68,7 @@ class SpeculativeDecoder:
 
             # Update prompt and remaining n
             current_n -= verified_tokens.shape[-1] - current_ids.shape[-1]
-            print(current_n)
+            #print(current_n)
             current_ids = verified_tokens
 
             # adaptive speculative depth, increase draft tokens as we increase confidence
@@ -94,7 +94,7 @@ class SpeculativeDecoder:
         eos_id = self.draft_tokenizer.eos_token_id
 
         for _ in trange(k, desc="Generating draft tokens"):
-            with torch.no_grad():
+            with torch.inference_mode():
                 start_time = time.time()
 
                 # Pass tokenized input to draft model
@@ -130,15 +130,15 @@ class SpeculativeDecoder:
         eos_id = self.target_tokenizer.eos_token_id
         k = len(draft_token_probs)
 
-        print("Verifying", k, "draft tokens")
-        with torch.no_grad():
+        #print("Verifying", k, "draft tokens")
+        with torch.inference_mode():
             start_time = time.time()
 
             # Pass prompt + K draft tokens into target model in one single forward pass
             output = self.target_model(draft_tokens)
 
             # Generate probabilities from target model
-            target_token_probs = torch.softmax(output.logits, dim=-1)
+            target_token_probs = output.logits  # use logits directly, argmax is identical
 
             elapsed_time = time.time() - start_time
             self.total_target_time += elapsed_time
@@ -168,6 +168,8 @@ class SpeculativeDecoder:
                     correct_token = target_token_probs[0][reject_pos].argmax().unsqueeze(0)
                     result = torch.cat([result[0], correct_token], dim=-1).unsqueeze(0)
                     self.output_tokens += 1
+                    self.cache.commit(accepted_ids + [correct_token.item()])
+                    self.cache.rollback()
                     if eos_id is not None and correct_token.item() == eos_id:
                         return result
                     
@@ -176,6 +178,8 @@ class SpeculativeDecoder:
                     bonus = target_token_probs[0][-1].argmax().unsqueeze(0)
                     result = torch.cat([result[0], bonus], dim=-1).unsqueeze(0)
                     self.output_tokens += 1
+                    self.cache.commit(accepted_ids + [bonus.item()])
+                    self.cache.rollback()
 
                 return result
             else:
@@ -186,18 +190,28 @@ class SpeculativeDecoder:
                     # we are accepting a token either way: from draft or bonus
                     self.output_tokens += 1
 
+                    target_token_prob = target_token_probs[0][-(i+1)][index].item()
+                    draft_token_prob = draft_token_probs[-i].item()
+                    accept_prob = min(1.0, target_token_prob / (draft_token_prob + 1e-8))
+
                     target_greedy_token = target_token_probs[0][-(i+1)].argmax().item()
-                    if target_greedy_token == index:
+                    #if target_greedy_token == index:
+                    if torch.rand(1).item() < accept_prob:
                         self.accepted_tokens += 1
                         # early stopping
                         if eos_id is not None and index == eos_id:
                             return draft_tokens
                     else:
+                        adjusted = torch.clamp(target_token_probs[0][-(i+1)] - probs_draft_at_position, min=0)
+
+
                         # Rollback behavior
                         draft_tokens = draft_tokens[0][:-i]
 
                         # Sample from target token probabilities the correct word
-                        correct_token = target_token_probs[0][-(i+1)].argmax().unsqueeze(0)
+                        #correct_token = target_token_probs[0][-(i+1)].argmax().unsqueeze(0)
+                        correct_token = torch.multinomial(adjusted, num_samples=1)
+
 
                         # Add correct token into sequence
                         draft_tokens = torch.cat([draft_tokens, correct_token], dim=-1)

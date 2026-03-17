@@ -61,7 +61,7 @@ class BaselineDecoder:
 
     # forward pass for a token
     def forward(self, input_ids):
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = self.model(input_ids=input_ids)
 
         next_token_id = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)

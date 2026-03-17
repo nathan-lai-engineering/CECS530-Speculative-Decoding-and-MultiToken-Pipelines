@@ -5,7 +5,7 @@ import time
 
 class SpeculativeDecoder:
 
-    def __init__(self, draft_model_path, target_model_path, adaptive_k = True):
+    def __init__(self, draft_model_path, target_model_path, adaptive_k=True, kv_cache=True):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.draft_model_path = draft_model_path
@@ -103,8 +103,6 @@ class SpeculativeDecoder:
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
                 draft_token_probs.append(probs.squeeze(0)[token.item()])
 
-                
-
                 elapsed_time = time.time() - start_time
                 self.total_draft_time += elapsed_time
                 self.total_time += elapsed_time
@@ -148,14 +146,12 @@ class SpeculativeDecoder:
                 # we are accepting a token either way: from draft or bonus
                 self.output_tokens += 1
 
-                if target_token_prob >= draft_token_prob:
+                accept_prob = min(1.0, target_token_prob / draft_token_prob)
+                if torch.rand(1).item() < accept_prob:
                     self.accepted_tokens += 1
                     # early stopping
                     if eos_id is not None and index == eos_id:
                         return draft_tokens
-                
-                    
-
                 else:
                     # Rollback behavior
                     draft_tokens = draft_tokens[0][:-i]

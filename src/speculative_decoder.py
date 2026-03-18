@@ -66,18 +66,20 @@ class SpeculativeDecoder:
         while(current_n > 0):
             # Generate k draft tokens
             draft_ids, draft_probs, draft_kv = self.generate_k_draft_tokens(
-                current_ids, k=min(current_n - 1, current_k), past_kv=self.draft_past_kv
+                current_ids, k=max(1, min(current_n - 1, current_k)),
+                past_kv=self.draft_past_kv if self.use_kv_cache else None
             )
 
             # Verify tokens in parallel
             accepted_before = self.accepted_tokens
             verified_tokens = self.parallel_verification(draft_ids, draft_probs, current_ids.shape[-1])
-            
+
             if verified_tokens.dim() == 1:
                 verified_tokens = verified_tokens.unsqueeze(0)
 
-            accepted_this_round = self.accepted_tokens - accepted_before
-            self.draft_past_kv = self.trim_cache(draft_kv, current_ids.shape[-1] + accepted_this_round)
+            if self.use_kv_cache:
+                accepted_this_round = self.accepted_tokens - accepted_before
+                self.draft_past_kv = self.trim_cache(draft_kv, current_ids.shape[-1] + accepted_this_round)
 
 
             # Update prompt and remaining n
@@ -105,22 +107,33 @@ class SpeculativeDecoder:
         new_draft_ids = []
         eos_id = self.draft_tokenizer.eos_token_id
 
-        # process tokens not yet in cache: full prompt on round 1, replacement/bonus token on subsequent rounds
-        cache_len = past_kv.get_seq_length() if past_kv is not None else 0
-        tokens_to_process = input_ids[:, cache_len:]
+        use_hf_cache = past_kv is not None or self.use_kv_cache
 
-        with torch.inference_mode():
-            prime_output = self.draft_model(tokens_to_process, past_key_values=past_kv, use_cache=True)
-            current_past = prime_output.past_key_values
-            next_probs = torch.softmax(prime_output.logits[:, -1, :], dim=-1)
+        if use_hf_cache:
+            # prime cache: process tokens not yet cached
+            cache_len = past_kv.get_seq_length() if past_kv is not None else 0
+            if cache_len >= input_ids.shape[-1]:
+                past_kv = None
+                cache_len = 0
+            tokens_to_process = input_ids[:, cache_len:]
+            with torch.inference_mode():
+                prime_output = self.draft_model(tokens_to_process, past_key_values=past_kv, use_cache=True)
+                current_past = prime_output.past_key_values
+                next_probs = torch.softmax(prime_output.logits[:, -1, :], dim=-1)
 
         for _ in trange(k, desc="Generating draft tokens"):
             with torch.inference_mode():
                 start_time = time.time()
 
-                token = torch.multinomial(next_probs, num_samples=1)
+                if use_hf_cache:
+                    token = torch.multinomial(next_probs, num_samples=1)
+                else:
+                    output = self.draft_model(draft_tokens)
+                    probs = torch.softmax(output.logits[:, -1, :], dim=-1)
+                    token = torch.multinomial(probs, num_samples=1)
+
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
-                draft_token_probs.append(next_probs.squeeze(0)[token.item()])
+                draft_token_probs.append((next_probs if use_hf_cache else probs).squeeze(0)[token.item()])
                 new_draft_ids.append(token.item())
 
                 elapsed_time = time.time() - start_time
@@ -133,13 +146,14 @@ class SpeculativeDecoder:
                 if eos_id is not None and token.item() == eos_id:
                     break
 
-                output = self.draft_model(token, past_key_values=current_past, use_cache=True)
-                current_past = output.past_key_values
-                next_probs = torch.softmax(output.logits[:, -1, :], dim=-1)
+                if use_hf_cache:
+                    output = self.draft_model(token, past_key_values=current_past, use_cache=True)
+                    current_past = output.past_key_values
+                    next_probs = torch.softmax(output.logits[:, -1, :], dim=-1)
 
         if self.cache is not None:
             self.cache.add_speculative(new_draft_ids)
-        return draft_tokens, draft_token_probs, current_past
+        return draft_tokens, draft_token_probs, current_past if use_hf_cache else None
 
     # single forward pass across draft tokens and their probs
     def parallel_verification(self, draft_tokens, draft_token_probs, prompt_len):

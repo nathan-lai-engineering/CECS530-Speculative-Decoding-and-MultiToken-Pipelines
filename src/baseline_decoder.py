@@ -27,7 +27,10 @@ class BaselineDecoder:
 
     # generate k tokens with k forward passes
     # returns input tokens + k number of output tokens
-    def generate_k_tokens(self, input_ids, n):
+    def generate_k_tokens(self, input_ids, n, warmup=True):
+        if warmup:
+            with torch.inference_mode():
+                self.model(input_ids=input_ids)
 
         # reset the metrics for this generation
         self.total_tokens = 0

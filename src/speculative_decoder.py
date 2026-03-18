@@ -44,6 +44,8 @@ class SpeculativeDecoder:
         self.min_draft_time = float('inf')
         self.min_target_time = float('inf')
 
+        self.verification_rounds = 0
+
         # sliding window for adaptive k
         self.window_accepted = 0 
         self.window_drafts = 0
@@ -59,11 +61,16 @@ class SpeculativeDecoder:
 
     # generate n tokens with k speculative depth
     # depending on adaptive_k flag, will use adaptive speculation depth
-    def generate_k_tokens(self, prompt, n=20, k=5):
+    def generate_k_tokens(self, prompt, n=20, k=5, warmup=True):
         current_n = n
         current_ids = self.draft_tokenizer(prompt, return_tensors="pt")["input_ids"].to(self.device)
         current_k = k
         eos_id = self.draft_tokenizer.eos_token_id
+
+        if warmup:
+            with torch.inference_mode():
+                self.draft_model(current_ids)
+                self.target_model(current_ids)
 
 
         # keep running batches of k until we have n tokens
@@ -167,6 +174,7 @@ class SpeculativeDecoder:
     def parallel_verification(self, draft_tokens, draft_token_probs, prompt_len):
         eos_id = self.target_tokenizer.eos_token_id
         k = len(draft_token_probs)
+        self.verification_rounds += 1
 
         #print("Verifying", k, "draft tokens")
         with torch.inference_mode():
@@ -221,30 +229,22 @@ class SpeculativeDecoder:
 
                 return result
             else:
-                # stochastic acceptance: apply softmax here since target_token_probs holds raw logits
-                target_probs = torch.softmax(target_token_probs, dim=-1)
+                # greedy acceptance: match target argmax to draft token
                 for i in range(k, 0, -1):
                     index = draft_tokens[0][-i].item()
 
                     self.output_tokens += 1
 
-                    target_token_prob = target_probs[0][-(i+1)][index].item()
-                    draft_token_prob = draft_token_probs[-i].item()
-                    accept_prob = min(1.0, target_token_prob / (draft_token_prob + 1e-8))
+                    target_greedy = target_token_probs[0][-(i+1)].argmax().item()
 
-                    if torch.rand(1).item() < accept_prob:
+                    if target_greedy == index:
                         self.accepted_tokens += 1
                         if eos_id is not None and index == eos_id:
-                            return draft_tokens
+                            # trim trailing tokens generated after EOS
+                            return draft_tokens[:, :draft_tokens.shape[-1] - (i - 1)]
                     else:
-                        # adjusted distribution: clamp(p_target - p_draft, min=0) then renormalize
-                        draft_full_probs = torch.zeros_like(target_probs[0][-(i+1)])
-                        draft_full_probs[index] = draft_token_prob
-                        adjusted = torch.clamp(target_probs[0][-(i+1)] - draft_full_probs, min=0)
-                        adjusted = adjusted / (adjusted.sum() + 1e-8)
-
                         draft_tokens = draft_tokens[:, :-i]
-                        correct_token = torch.multinomial(adjusted, num_samples=1)
+                        correct_token = target_token_probs[0][-(i+1)].argmax().unsqueeze(0)
                         draft_tokens = torch.cat([draft_tokens[0], correct_token], dim=-1).unsqueeze(0)
 
                         if eos_id is not None and correct_token.item() == eos_id:
@@ -270,12 +270,16 @@ class SpeculativeDecoder:
     def token_throughput(self):
         return {
             "tokens_per_second": self.output_tokens / self.total_time,
-            "total_draft_tokens": self.total_draft_tokens,
+            "total_tokens": self.output_tokens,
             "total_time": self.total_time,
             "mean_time_per_token": self.total_time / self.output_tokens,
-            "max_time_per_draft_token": self.max_draft_time, 
-            "min_time_per_draft_token": self.min_draft_time,
-            "acceptance_rate": self.accepted_tokens / self.total_draft_tokens,
+            "max_time_per_token": self.max_draft_time, 
+            "min_time_per_token": self.min_draft_time,
+
+            # speculative decoding exclusive metrics
             "accepted_tokens": self.accepted_tokens,
-            "output_tokens": self.output_tokens
+            "total_draft_tokens": self.total_draft_tokens,
+            "verification_rounds": self.verification_rounds,
+            "total_draft_time": self.total_draft_time,
+            "total_target_time": self.total_target_time
         }

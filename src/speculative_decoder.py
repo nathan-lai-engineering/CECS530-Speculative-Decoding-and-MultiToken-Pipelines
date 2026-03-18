@@ -26,7 +26,6 @@ class SpeculativeDecoder:
         
         # metrics
         self.reset_metrics()
-        self.cache = KVCache() if self.use_kv_cache else None
 
 
     # reset all the metrics
@@ -45,10 +44,18 @@ class SpeculativeDecoder:
         self.min_draft_time = float('inf')
         self.min_target_time = float('inf')
 
+        self.draft_past_kv = None
+        self.cache = KVCache() if self.use_kv_cache else None
+
+    def trim_cache(self, past_key_values, length):
+        import copy
+        trimmed = copy.deepcopy(past_key_values)
+        trimmed.crop(length)
+        return trimmed
+
     # generate n tokens with k speculative depth
     # depending on adaptive_k flag, will use adaptive speculation depth
     def generate_k_tokens(self, prompt, n=20, k=5):
-        print(f"Is CUDA available? {torch.cuda.is_available()}")
         current_n = n
         current_ids = self.draft_tokenizer(prompt, return_tensors="pt")["input_ids"].to(self.device)
         current_k = k
@@ -58,13 +65,20 @@ class SpeculativeDecoder:
         # keep running batches of k until we have n tokens
         while(current_n > 0):
             # Generate k draft tokens
-            draft_ids, draft_probs = self.generate_k_draft_tokens(current_ids, k=min(current_n - 1, current_k))
+            draft_ids, draft_probs, draft_kv = self.generate_k_draft_tokens(
+                current_ids, k=min(current_n - 1, current_k), past_kv=self.draft_past_kv
+            )
 
             # Verify tokens in parallel
+            accepted_before = self.accepted_tokens
             verified_tokens = self.parallel_verification(draft_ids, draft_probs, current_ids.shape[-1])
             
             if verified_tokens.dim() == 1:
                 verified_tokens = verified_tokens.unsqueeze(0)
+
+            accepted_this_round = self.accepted_tokens - accepted_before
+            self.draft_past_kv = self.trim_cache(draft_kv, current_ids.shape[-1] + accepted_this_round)
+
 
             # Update prompt and remaining n
             current_n -= verified_tokens.shape[-1] - current_ids.shape[-1]
@@ -85,30 +99,28 @@ class SpeculativeDecoder:
         return verified_tokens
 
     # generates k draft tokens
-    def generate_k_draft_tokens(self, input_ids, k):
-        # As model generates draft tokens, it is added into draft inputs
+    def generate_k_draft_tokens(self, input_ids, k, past_kv=None):
         draft_tokens = input_ids.clone()
         draft_token_probs = []
         new_draft_ids = []
-
         eos_id = self.draft_tokenizer.eos_token_id
+
+        # process tokens not yet in cache: full prompt on round 1, replacement/bonus token on subsequent rounds
+        cache_len = past_kv.get_seq_length() if past_kv is not None else 0
+        tokens_to_process = input_ids[:, cache_len:]
+
+        with torch.inference_mode():
+            prime_output = self.draft_model(tokens_to_process, past_key_values=past_kv, use_cache=True)
+            current_past = prime_output.past_key_values
+            next_probs = torch.softmax(prime_output.logits[:, -1, :], dim=-1)
 
         for _ in trange(k, desc="Generating draft tokens"):
             with torch.inference_mode():
                 start_time = time.time()
 
-                # Pass tokenized input to draft model
-                output = self.draft_model(draft_tokens)
-
-                # Apply softmax on token logits to produce probabilities
-                probs = torch.softmax(output.logits[:, -1, :], dim=-1)
-
-                # Sample from probabilities; output is an index of that token from probs
-                token = torch.multinomial(probs, num_samples=1)
-
-                # Add new tokens into draft tokens
+                token = torch.multinomial(next_probs, num_samples=1)
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
-                draft_token_probs.append(probs.squeeze(0)[token.item()])
+                draft_token_probs.append(next_probs.squeeze(0)[token.item()])
                 new_draft_ids.append(token.item())
 
                 elapsed_time = time.time() - start_time
@@ -121,9 +133,13 @@ class SpeculativeDecoder:
                 if eos_id is not None and token.item() == eos_id:
                     break
 
+                output = self.draft_model(token, past_key_values=current_past, use_cache=True)
+                current_past = output.past_key_values
+                next_probs = torch.softmax(output.logits[:, -1, :], dim=-1)
+
         if self.cache is not None:
-            self.cache.add_speculative(new_draft_ids)            
-        return draft_tokens, draft_token_probs
+            self.cache.add_speculative(new_draft_ids)
+        return draft_tokens, draft_token_probs, current_past
 
     # single forward pass across draft tokens and their probs
     def parallel_verification(self, draft_tokens, draft_token_probs, prompt_len):
@@ -183,42 +199,34 @@ class SpeculativeDecoder:
 
                 return result
             else:
-                # Compare probability output of draft token from target model vs. draft model
+                # stochastic acceptance: apply softmax here since target_token_probs holds raw logits
+                target_probs = torch.softmax(target_token_probs, dim=-1)
                 for i in range(k, 0, -1):
                     index = draft_tokens[0][-i].item()
-                    
-                    # we are accepting a token either way: from draft or bonus
+
                     self.output_tokens += 1
 
-                    target_token_prob = target_token_probs[0][-(i+1)][index].item()
+                    target_token_prob = target_probs[0][-(i+1)][index].item()
                     draft_token_prob = draft_token_probs[-i].item()
                     accept_prob = min(1.0, target_token_prob / (draft_token_prob + 1e-8))
 
-                    target_greedy_token = target_token_probs[0][-(i+1)].argmax().item()
-                    #if target_greedy_token == index:
                     if torch.rand(1).item() < accept_prob:
                         self.accepted_tokens += 1
-                        # early stopping
                         if eos_id is not None and index == eos_id:
                             return draft_tokens
                     else:
-                        adjusted = torch.clamp(target_token_probs[0][-(i+1)] - probs_draft_at_position, min=0)
+                        # adjusted distribution: clamp(p_target - p_draft, min=0) then renormalize
+                        draft_full_probs = torch.zeros_like(target_probs[0][-(i+1)])
+                        draft_full_probs[index] = draft_token_prob
+                        adjusted = torch.clamp(target_probs[0][-(i+1)] - draft_full_probs, min=0)
+                        adjusted = adjusted / (adjusted.sum() + 1e-8)
 
-
-                        # Rollback behavior
-                        draft_tokens = draft_tokens[0][:-i]
-
-                        # Sample from target token probabilities the correct word
-                        #correct_token = target_token_probs[0][-(i+1)].argmax().unsqueeze(0)
+                        draft_tokens = draft_tokens[:, :-i]
                         correct_token = torch.multinomial(adjusted, num_samples=1)
+                        draft_tokens = torch.cat([draft_tokens[0], correct_token], dim=-1).unsqueeze(0)
 
-
-                        # Add correct token into sequence
-                        draft_tokens = torch.cat([draft_tokens, correct_token], dim=-1)
-                    
-                        # early stopping
                         if eos_id is not None and correct_token.item() == eos_id:
-                            return draft_tokens 
+                            return draft_tokens
                         break
 
 

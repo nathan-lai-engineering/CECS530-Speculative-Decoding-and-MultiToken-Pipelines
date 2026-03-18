@@ -31,7 +31,7 @@ def predict(prompt, model_path, n, type="baseline", target_path=None, k=None):
             output_text, metrics = None, None
     return output_text, metrics
 
-prompt = "The definition of Speculative decoding in LLM models is"
+prompt = "The first digits of pi are "
 
 print("Starting predictions on prompt:", prompt)
 

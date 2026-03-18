@@ -102,7 +102,7 @@ class SpeculativeDecoder:
                 if self.window_drafts >= 10:  # recalculate every 10 draft tokens
                     window_rate = self.window_accepted / self.window_drafts
                     optimal_k = int(1 / (1 - window_rate + 0.01))
-                    current_k = max(2, min(k * 2, optimal_k))
+                    current_k = max(k, min(k * 2, optimal_k))
                     self.window_accepted = 0
                     self.window_drafts = 0
 

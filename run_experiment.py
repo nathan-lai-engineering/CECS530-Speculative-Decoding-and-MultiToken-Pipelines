@@ -43,7 +43,7 @@ def append_csv_data(csv_array, scenario, output, metrics):
 PROMPT = "The first digits of pi are "
 TINYLLAMA_PATH = "./models/tinyllama-1.1b"
 LLAMA2_7B_PATH = "./models/llama2-7b"
-N = 50
+N = 200
 
 print("Starting predictions on prompt:", PROMPT)
 csv_data = [[
@@ -52,6 +52,7 @@ csv_data = [[
     "tokens_per_second", 
     "total_tokens", 
     "total_time", 
+
     "mean_time_per_token", 
     "max_time_per_token", 
     "min_time_per_token", 

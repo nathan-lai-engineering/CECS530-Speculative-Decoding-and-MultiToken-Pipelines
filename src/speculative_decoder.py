@@ -44,6 +44,10 @@ class SpeculativeDecoder:
         self.min_draft_time = float('inf')
         self.min_target_time = float('inf')
 
+        # sliding window for adaptive k
+        self.window_accepted = 0 
+        self.window_drafts = 0
+
         self.draft_past_kv = None
         self.cache = KVCache() if self.use_kv_cache else None
 
@@ -77,8 +81,8 @@ class SpeculativeDecoder:
             if verified_tokens.dim() == 1:
                 verified_tokens = verified_tokens.unsqueeze(0)
 
+            accepted_this_round = self.accepted_tokens - accepted_before
             if self.use_kv_cache:
-                accepted_this_round = self.accepted_tokens - accepted_before
                 self.draft_past_kv = self.trim_cache(draft_kv, current_ids.shape[-1] + accepted_this_round)
 
 
@@ -87,13 +91,20 @@ class SpeculativeDecoder:
             #print(current_n)
             current_ids = verified_tokens
 
+
+
             # adaptive speculative depth, increase draft tokens as we increase confidence
+            # we use a sliding window so that "confidence" is only based on recent rounds
+            # what used to happen was that early rounds decimated k and stayed there and took too long to grow back up
             if self.adaptive_k:
-                acceptance_rate = self.accepted_tokens / self.total_draft_tokens
-                if acceptance_rate < 0.4:
-                    current_k = int(max(2, current_k / 2))
-                elif acceptance_rate > 0.85:
-                    current_k = int(min(k * 2, current_k + 2))
+                self.window_accepted += accepted_this_round
+                self.window_drafts += len(draft_probs)
+                if self.window_drafts >= 10:  # recalculate every 10 draft tokens
+                    window_rate = self.window_accepted / self.window_drafts
+                    optimal_k = int(1 / (1 - window_rate + 0.01))
+                    current_k = max(2, min(k * 2, optimal_k))
+                    self.window_accepted = 0
+                    self.window_drafts = 0
 
             if eos_id is not None and eos_id in verified_tokens:
                 break
@@ -107,33 +118,35 @@ class SpeculativeDecoder:
         new_draft_ids = []
         eos_id = self.draft_tokenizer.eos_token_id
 
-        use_hf_cache = past_kv is not None or self.use_kv_cache
-
-        if use_hf_cache:
-            # prime cache: process tokens not yet cached
-            cache_len = past_kv.get_seq_length() if past_kv is not None else 0
-            if cache_len >= input_ids.shape[-1]:
-                past_kv = None
-                cache_len = 0
-            tokens_to_process = input_ids[:, cache_len:]
-            with torch.inference_mode():
-                prime_output = self.draft_model(tokens_to_process, past_key_values=past_kv, use_cache=True)
-                current_past = prime_output.past_key_values
-                next_probs = torch.softmax(prime_output.logits[:, -1, :], dim=-1)
+        use_hf_cache = self.use_kv_cache
+        current_past = past_kv if use_hf_cache else None
+        is_first_draft = True
 
         for _ in trange(k, desc="Generating draft tokens"):
             with torch.inference_mode():
                 start_time = time.time()
 
                 if use_hf_cache:
-                    token = torch.multinomial(next_probs, num_samples=1)
+                    if is_first_draft:
+                        # process all tokens not yet in cache
+                        cache_len = current_past.get_seq_length() if current_past is not None else 0
+                        if cache_len >= input_ids.shape[-1]:
+                            current_past = None
+                            cache_len = 0
+                        tokens_in = input_ids[:, cache_len:]
+                        output = self.draft_model(tokens_in, past_key_values=current_past, use_cache=True)
+                        is_first_draft = False
+                    else:
+                        output = self.draft_model(draft_tokens[:, -1:], past_key_values=current_past, use_cache=True)
+                    current_past = output.past_key_values
+                    probs = torch.softmax(output.logits[:, -1, :], dim=-1)
                 else:
                     output = self.draft_model(draft_tokens)
                     probs = torch.softmax(output.logits[:, -1, :], dim=-1)
-                    token = torch.multinomial(probs, num_samples=1)
 
+                token = torch.multinomial(probs, num_samples=1)
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
-                draft_token_probs.append((next_probs if use_hf_cache else probs).squeeze(0)[token.item()])
+                draft_token_probs.append(probs.squeeze(0)[token.item()])
                 new_draft_ids.append(token.item())
 
                 elapsed_time = time.time() - start_time
@@ -146,14 +159,9 @@ class SpeculativeDecoder:
                 if eos_id is not None and token.item() == eos_id:
                     break
 
-                if use_hf_cache:
-                    output = self.draft_model(token, past_key_values=current_past, use_cache=True)
-                    current_past = output.past_key_values
-                    next_probs = torch.softmax(output.logits[:, -1, :], dim=-1)
-
         if self.cache is not None:
             self.cache.add_speculative(new_draft_ids)
-        return draft_tokens, draft_token_probs, current_past if use_hf_cache else None
+        return draft_tokens, draft_token_probs, current_past
 
     # single forward pass across draft tokens and their probs
     def parallel_verification(self, draft_tokens, draft_token_probs, prompt_len):

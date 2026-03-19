@@ -35,19 +35,21 @@ def predict(prompt_text, model_path, num_tokens, decoder_type="baseline", target
 
 
 def append_csv_data(csv_rows, scenario_name, generated_output, metrics_dict):
-    csv_rows.append([scenario_name, generated_output] + list(metrics_dict.values()))
+    acceptance_rate = metrics_dict["accepted_tokens"] / max(1, metrics_dict["total_draft_tokens"])
+    rollback_rate = metrics_dict.get("rollback_count", 0) / max(1, metrics_dict["verification_rounds"])
+
+    csv_rows.append(
+        [scenario_name, generated_output] +
+        list(metrics_dict.values()) +
+        [acceptance_rate, rollback_rate]
+    )
     return csv_rows
 
 
-# PROMPT = "The first digits of pi are "
-# TINYLLAMA_PATH = "./models/tinyllama-1.1b"
-# LLAMA2_7B_PATH = "./models/llama2-7b"
-# N = 200
-
 PROMPT_TEXT = "The first digits of pi are "
-DRAFT_MODEL_PATH = "gpt2"
-TARGET_MODEL_PATH = "gpt2"
-NUM_OUTPUT_TOKENS = 50
+DRAFT_MODEL_PATH = "./models/tinyllama-1.1b"
+TARGET_MODEL_PATH = "./models/llama2-7b"
+N = 200
 
 print("Starting predictions on prompt:", PROMPT_TEXT)
 
@@ -64,33 +66,35 @@ csv_rows = [[
     "total_draft_tokens",
     "verification_rounds",
     "total_draft_time",
-    "total_target_time"
+    "total_target_time",
+    "acceptance_rate",
+    "rollback_rate"
 ]]
 
 # multi-token pipeline
-scenario_name_7 = "GPT2 -> GPT2 - Multi-Token Pipeline"
+scenario_name_7 = "Llama2 1.1b -> 7b - Multi-Token Pipeline"
 generated_output_7, metrics_7 = predict(
     PROMPT_TEXT,
     DRAFT_MODEL_PATH,
-    NUM_OUTPUT_TOKENS,
+    N,
     decoder_type="pipeline",
     target_model_path=TARGET_MODEL_PATH,
     use_adaptive_k=False
 )
 append_csv_data(csv_rows, scenario_name_7, generated_output_7, metrics_7)
 
-scenario_name_8 = "GPT2 -> GPT2 - Multi-Token Pipeline with Adaptive K"
+scenario_name_8 = "Llama2 1.1b -> 7b - Multi-Token Pipeline with Adaptive K"
 generated_output_8, metrics_8 = predict(
     PROMPT_TEXT,
     DRAFT_MODEL_PATH,
-    NUM_OUTPUT_TOKENS,
+    N,
     decoder_type="pipeline",
     target_model_path=TARGET_MODEL_PATH,
     use_adaptive_k=True
 )
 append_csv_data(csv_rows, scenario_name_8, generated_output_8, metrics_8)
 
-# save the date to a csv file, we'll save all individual runs
+# save the data to a csv file
 output_filename = f'results_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
 output_file_path = os.path.join(os.path.dirname(__file__), "results", output_filename)
 

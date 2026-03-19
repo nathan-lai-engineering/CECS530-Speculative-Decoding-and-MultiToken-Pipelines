@@ -54,7 +54,7 @@ def append_csv_data(csv_rows, scenario_name, generated_output, metrics_dict):
 PROMPT_TEXT = "The first digits of pi are "
 DRAFT_MODEL_PATH = "./models/tinyllama-1.1b"
 TARGET_MODEL_PATH = "./models/llama2-7b"
-N = 100
+N = 50
 
 print("Starting predictions on prompt:", PROMPT_TEXT)
 

@@ -2,7 +2,10 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
 from tqdm import tqdm, trange
 import time
-from kv_cache import KVCache
+try:
+    from kv_cache import KVCache
+except ModuleNotFoundError:
+    from src.kv_cache import KVCache
 
 
 class SpeculativeDecoder:

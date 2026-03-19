@@ -1,8 +1,13 @@
 import sys
 import os
 import csv
+import torch
 from datetime import datetime
 from src.multi_token_pipeline import MultiTokenPipeline
+
+if not torch.cuda.is_available():
+    raise RuntimeError("CUDA is not available. This experiment requires a GPU.")
+print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".", "src"))
 from src.baseline_decoder import BaselineDecoder
@@ -49,7 +54,7 @@ def append_csv_data(csv_rows, scenario_name, generated_output, metrics_dict):
 PROMPT_TEXT = "The first digits of pi are "
 DRAFT_MODEL_PATH = "./models/tinyllama-1.1b"
 TARGET_MODEL_PATH = "./models/llama2-7b"
-N = 200
+N = 100
 
 print("Starting predictions on prompt:", PROMPT_TEXT)
 

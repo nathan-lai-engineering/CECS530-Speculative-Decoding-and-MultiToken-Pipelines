@@ -43,7 +43,7 @@ def append_csv_data(csv_array, scenario, output, metrics):
 PROMPT = "The first digits of pi are "
 TINYLLAMA_PATH = "./models/tinyllama-1.1b"
 LLAMA2_7B_PATH = "./models/llama2-7b"
-N = 200
+N = 100
 
 print("Starting predictions on prompt:", PROMPT)
 csv_data = [[

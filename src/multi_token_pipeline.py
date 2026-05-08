@@ -48,6 +48,9 @@ class MultiTokenPipeline:
         self.draft_tokenizer = self.decoder.draft_tokenizer
         self.target_tokenizer = self.decoder.target_tokenizer
 
+        self._draft_model_bytes = self.decoder._draft_model_bytes
+        self._target_model_bytes = self.decoder._target_model_bytes
+
         self.reset_metrics()
 
     def reset_metrics(self):
@@ -65,6 +68,12 @@ class MultiTokenPipeline:
         self.max_target_time = 0.0
         self.min_draft_time = float("inf")
         self.min_target_time = float("inf")
+
+        # memory metrics
+        self.peak_memory_MB = 0.0
+        self.total_draft_bytes = 0
+        self.total_target_bytes = 0
+        self.peak_memory_bandwidth_GB_per_s = 0.0
 
         # pipeline stats
         self.pipeline_total_time = 0.0
@@ -108,8 +117,11 @@ class MultiTokenPipeline:
 
         self.total_draft_time += elapsed
         self.total_draft_tokens += len(draft_probs)
+        self.total_draft_bytes += self._draft_model_bytes * len(draft_probs)
         self.max_draft_time = max(self.max_draft_time, elapsed)
         self.min_draft_time = min(self.min_draft_time, elapsed)
+        batch_bw = (self._draft_model_bytes * len(draft_probs) / 1e9) / elapsed if elapsed > 0 else 0.0
+        self.peak_memory_bandwidth_GB_per_s = max(self.peak_memory_bandwidth_GB_per_s, batch_bw)
 
         start = self.draft_stage_free_at
         end = start + elapsed
@@ -173,8 +185,11 @@ class MultiTokenPipeline:
         self.pipeline_total_time = max(self.pipeline_total_time, verify_end)
 
         self.total_target_time += elapsed
+        self.total_target_bytes += self._target_model_bytes
         self.max_target_time = max(self.max_target_time, elapsed)
         self.min_target_time = min(self.min_target_time, elapsed)
+        verify_bw = (self._target_model_bytes / 1e9) / elapsed if elapsed > 0 else 0.0
+        self.peak_memory_bandwidth_GB_per_s = max(self.peak_memory_bandwidth_GB_per_s, verify_bw)
 
         self.verification_rounds += 1
         self.batches_verified += 1
@@ -194,6 +209,9 @@ class MultiTokenPipeline:
             with torch.inference_mode():
                 self.draft_model(committed_ids)
                 self.target_model(committed_ids)
+
+        if self.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
 
         while remaining > 0:
             # fill buffer
@@ -251,12 +269,16 @@ class MultiTokenPipeline:
             self.verify_stage_free_at
         )
 
+        if self.device == "cuda":
+            self.peak_memory_MB = torch.cuda.max_memory_allocated() / 1e6
+
         return committed_ids
 
     def token_throughput(self):
         total_time = self.pipeline_total_time if self.pipeline_total_time > 0 else (
             self.total_draft_time + self.total_target_time
         )
+        total_bytes = self.total_draft_bytes + self.total_target_bytes
 
         return {
             "tokens_per_second": self.output_tokens / total_time if total_time > 0 else 0.0,
@@ -282,4 +304,10 @@ class MultiTokenPipeline:
             "buffer_capacity": self.buffer_capacity,
             "batches_drafted": self.batches_drafted,
             "batches_verified": self.batches_verified,
+
+            # memory metrics
+            "peak_memory_MB": self.peak_memory_MB,
+            "model_memory_MB": (self._draft_model_bytes + self._target_model_bytes) / 1e6,
+            "memory_bandwidth_GB_per_s": (total_bytes / 1e9) / total_time if total_time > 0 else 0.0,
+            "peak_memory_bandwidth_GB_per_s": self.peak_memory_bandwidth_GB_per_s,
         }

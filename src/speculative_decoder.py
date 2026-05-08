@@ -26,7 +26,9 @@ class SpeculativeDecoder:
         self.draft_model.eval()
         self.target_model.eval()
 
-        
+        self._draft_model_bytes = sum(p.numel() * p.element_size() for p in self.draft_model.parameters())
+        self._target_model_bytes = sum(p.numel() * p.element_size() for p in self.target_model.parameters())
+
         # metrics
         self.reset_metrics()
 
@@ -48,6 +50,12 @@ class SpeculativeDecoder:
         self.min_target_time = float('inf')
 
         self.verification_rounds = 0
+
+        # memory metrics
+        self.peak_memory_MB = 0.0
+        self.total_draft_bytes = 0
+        self.total_target_bytes = 0
+        self.peak_memory_bandwidth_GB_per_s = 0.0
 
         # sliding window for adaptive k
         self.window_accepted = 0 
@@ -75,6 +83,8 @@ class SpeculativeDecoder:
                 self.draft_model(current_ids)
                 self.target_model(current_ids)
 
+        if self.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
 
         # keep running batches of k until we have n tokens
         while(current_n > 0):
@@ -118,6 +128,9 @@ class SpeculativeDecoder:
 
             if eos_id is not None and eos_id in verified_tokens:
                 break
+
+        if self.device == "cuda":
+            self.peak_memory_MB = torch.cuda.max_memory_allocated() / 1e6
 
         return verified_tokens
 
@@ -163,8 +176,13 @@ class SpeculativeDecoder:
                 self.total_draft_time += elapsed_time
                 self.total_time += elapsed_time
                 self.total_draft_tokens += 1
+                self.total_draft_bytes += self._draft_model_bytes
                 self.max_draft_time = max(self.max_draft_time, elapsed_time)
                 self.min_draft_time = min(self.min_draft_time, elapsed_time)
+                self.peak_memory_bandwidth_GB_per_s = max(
+                    self.peak_memory_bandwidth_GB_per_s,
+                    (self._draft_model_bytes / 1e9) / elapsed_time
+                )
 
                 if eos_id is not None and token.item() == eos_id:
                     break
@@ -192,8 +210,13 @@ class SpeculativeDecoder:
             elapsed_time = time.time() - start_time
             self.total_target_time += elapsed_time
             self.total_time += elapsed_time
+            self.total_target_bytes += self._target_model_bytes
             self.max_target_time = max(self.max_target_time, elapsed_time)
             self.min_target_time = min(self.min_target_time, elapsed_time)
+            self.peak_memory_bandwidth_GB_per_s = max(
+                self.peak_memory_bandwidth_GB_per_s,
+                (self._target_model_bytes / 1e9) / elapsed_time
+            )
 
             # if kv-cache is being used
             if self.cache is not None:
@@ -271,12 +294,13 @@ class SpeculativeDecoder:
 
     # the metrics to look at
     def token_throughput(self):
+        total_bytes = self.total_draft_bytes + self.total_target_bytes
         return {
             "tokens_per_second": self.output_tokens / self.total_time,
             "total_tokens": self.output_tokens,
             "total_time": self.total_time,
             "mean_time_per_token": self.total_time / self.output_tokens,
-            "max_time_per_token": self.max_draft_time, 
+            "max_time_per_token": self.max_draft_time,
             "min_time_per_token": self.min_draft_time,
 
             # speculative decoding exclusive metrics
@@ -284,5 +308,11 @@ class SpeculativeDecoder:
             "total_draft_tokens": self.total_draft_tokens,
             "verification_rounds": self.verification_rounds,
             "total_draft_time": self.total_draft_time,
-            "total_target_time": self.total_target_time
+            "total_target_time": self.total_target_time,
+
+            # memory metrics
+            "peak_memory_MB": self.peak_memory_MB,
+            "model_memory_MB": (self._draft_model_bytes + self._target_model_bytes) / 1e6,
+            "memory_bandwidth_GB_per_s": (total_bytes / 1e9) / self.total_time if self.total_time > 0 else 0.0,
+            "peak_memory_bandwidth_GB_per_s": self.peak_memory_bandwidth_GB_per_s,
         }

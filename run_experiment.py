@@ -47,20 +47,23 @@ N = 100
 
 print("Starting predictions on prompt:", PROMPT)
 csv_data = [[
-    "Scenario", 
-    "Output", 
-    "tokens_per_second", 
-    "total_tokens", 
-    "total_time", 
-
-    "mean_time_per_token", 
-    "max_time_per_token", 
-    "min_time_per_token", 
-    "accepted_tokens", 
-    "total_draft_tokens", 
-    "verification_rounds", 
-    "total_draft_time", 
-    "total_target_time"
+    "Scenario",
+    "Output",
+    "tokens_per_second",
+    "total_tokens",
+    "total_time",
+    "mean_time_per_token",
+    "max_time_per_token",
+    "min_time_per_token",
+    "accepted_tokens",
+    "total_draft_tokens",
+    "verification_rounds",
+    "total_draft_time",
+    "total_target_time",
+    "peak_memory_MB",
+    "model_memory_MB",
+    "memory_bandwidth_GB_per_s",
+    "peak_memory_bandwidth_GB_per_s",
 ]]
 
 # baseline of draft

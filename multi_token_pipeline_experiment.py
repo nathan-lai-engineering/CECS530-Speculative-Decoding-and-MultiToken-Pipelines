@@ -72,8 +72,22 @@ csv_rows = [[
     "verification_rounds",
     "total_draft_time",
     "total_target_time",
+    "pipeline_total_time",
+    "draft_stage_busy_time",
+    "verify_stage_busy_time",
+    "pipeline_bubbles",
+    "rollback_events",
+    "flushed_batches",
+    "max_buffer_occupancy",
+    "buffer_capacity",
+    "batches_drafted",
+    "batches_verified",
+    "peak_memory_MB",
+    "model_memory_MB",
+    "memory_bandwidth_GB_per_s",
+    "peak_memory_bandwidth_GB_per_s",
     "acceptance_rate",
-    "rollback_rate"
+    "rollback_rate",
 ]]
 
 # multi-token pipeline

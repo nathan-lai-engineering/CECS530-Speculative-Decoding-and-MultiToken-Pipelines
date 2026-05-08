@@ -21,6 +21,7 @@ class BaselineDecoder:
             torch_dtype=torch.float16
         ).to(self.device)
         self.model.eval()
+        self._model_bytes = sum(p.numel() * p.element_size() for p in self.model.parameters())
 
 
 
@@ -37,6 +38,10 @@ class BaselineDecoder:
         self.total_time = 0
         self.max_time_per_token = 0
         self.min_time_per_token = float('inf')
+        self.peak_memory_bandwidth_GB_per_s = 0.0
+
+        if self.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
 
         tokens = input_ids.clone()
         eos_id = self.tokenizer.eos_token_id
@@ -56,10 +61,19 @@ class BaselineDecoder:
             self.total_tokens += 1
             self.max_time_per_token = max(self.max_time_per_token, elapsed_time)
             self.min_time_per_token = min(self.min_time_per_token, elapsed_time)
+            self.peak_memory_bandwidth_GB_per_s = max(
+                self.peak_memory_bandwidth_GB_per_s,
+                (self._model_bytes / 1e9) / elapsed_time
+            )
 
             if eos_id is not None and next_token.item() == eos_id:
                 break
-        
+
+        if self.device == "cuda":
+            self.peak_memory_MB = torch.cuda.max_memory_allocated() / 1e6
+        else:
+            self.peak_memory_MB = 0.0
+
         return tokens
 
     # forward pass for a token
@@ -73,13 +87,23 @@ class BaselineDecoder:
     # the metrics to look at
     def token_throughput(self):
         if hasattr(self, "total_tokens") and hasattr(self, "total_time"):
+            total_bytes = self._model_bytes * self.total_tokens
             return {
                 "tokens_per_second": self.total_tokens / self.total_time,
                 "total_tokens": self.total_tokens,
                 "total_time": self.total_time,
                 "mean_time_per_token": self.total_time / self.total_tokens,
-                "max_time_per_token": self.max_time_per_token, 
-                "min_time_per_token": self.min_time_per_token
+                "max_time_per_token": self.max_time_per_token,
+                "min_time_per_token": self.min_time_per_token,
+                "accepted_tokens": 0,
+                "total_draft_tokens": 0,
+                "verification_rounds": 0,
+                "total_draft_time": 0.0,
+                "total_target_time": 0.0,
+                "peak_memory_MB": getattr(self, "peak_memory_MB", 0.0),
+                "model_memory_MB": self._model_bytes / 1e6,
+                "memory_bandwidth_GB_per_s": (total_bytes / 1e9) / self.total_time,
+                "peak_memory_bandwidth_GB_per_s": getattr(self, "peak_memory_bandwidth_GB_per_s", 0.0),
             }
         else:
             print("no generations ran yet, so no throughput really")
@@ -88,8 +112,17 @@ class BaselineDecoder:
                 "total_tokens": 0,
                 "total_time": 0,
                 "mean_time_per_token": 0,
-                "max_time_per_token": 0, 
-                "min_time_per_token": float('inf')
+                "max_time_per_token": 0,
+                "min_time_per_token": float('inf'),
+                "accepted_tokens": 0,
+                "total_draft_tokens": 0,
+                "verification_rounds": 0,
+                "total_draft_time": 0.0,
+                "total_target_time": 0.0,
+                "peak_memory_MB": 0.0,
+                "model_memory_MB": self._model_bytes / 1e6,
+                "memory_bandwidth_GB_per_s": 0.0,
+                "peak_memory_bandwidth_GB_per_s": 0.0,
             }
         
     # string to input_ids

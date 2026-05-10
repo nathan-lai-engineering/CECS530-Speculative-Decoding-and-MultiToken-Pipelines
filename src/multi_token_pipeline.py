@@ -171,6 +171,12 @@ class MultiTokenPipeline:
         if mismatch:
             correct_token = logits[0][prompt_len - 1 + accepted_count].argmax().unsqueeze(0)
             result = torch.cat([result[0], correct_token], dim=-1).unsqueeze(0)
+        else:
+            # full draft accepted, claim one bonus target token
+            bonus_token = logits[0][prompt_len - 1 + accepted_count].argmax().unsqueeze(0)
+            result = torch.cat([result[0], bonus_token], dim=-1).unsqueeze(0)
+
+
 
         emitted_count = result.shape[-1] - prompt_len
 
@@ -253,10 +259,25 @@ class MultiTokenPipeline:
             self.window_accepted += accepted_count
             self.window_drafts += max(1, oldest.draft_count)
 
+            # if self.adaptive_k and self.window_drafts >= 10:
+            #     rate = self.window_accepted / self.window_drafts
+            #     optimal_k = int(1 / (1 - rate + 0.01))
+            #     current_k = max(k, min(k * 2, optimal_k))
+            #     self.window_accepted = 0
+            #     self.window_drafts = 0
+
             if self.adaptive_k and self.window_drafts >= 10:
-                rate = self.window_accepted / self.window_drafts
-                optimal_k = int(1 / (1 - rate + 0.01))
-                current_k = max(k, min(k * 2, optimal_k))
+                rate = self.window_accepted / max(1, self.window_drafts)
+
+                if rate < 0.25:
+                    current_k = 1
+                elif rate < 0.50:
+                    current_k = 2
+                elif rate < 0.75:
+                    current_k = 4
+                else:
+                    current_k = 8
+
                 self.window_accepted = 0
                 self.window_drafts = 0
 

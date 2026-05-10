@@ -17,8 +17,8 @@ from src.speculative_decoder import SpeculativeDecoder
 # predict using either baseline or speculative method on given model
 def predict(prompt_text, model_path, num_tokens, decoder_type="baseline", target_model_path=None, draft_k=None, use_kv_cache=True, use_adaptive_k=True):
     if draft_k is None:
-        # draft_k = max(2, int(0.10 * num_tokens))
-        draft_k = 4
+        draft_k = max(2, int(0.10 * num_tokens))
+        # draft_k = 4
 
     match decoder_type:
         case "pipeline":
@@ -28,7 +28,7 @@ def predict(prompt_text, model_path, num_tokens, decoder_type="baseline", target
                 draft_model_path=model_path,
                 target_model_path=resolved_target_path,
                 adaptive_k=use_adaptive_k,
-                buffer_capacity=4
+                buffer_capacity=2
             )
             generated_token_ids = pipeline_decoder.generate_k_tokens(prompt_text, n=num_tokens, k=draft_k)
             generated_text = pipeline_decoder.decode(generated_token_ids)
@@ -42,7 +42,8 @@ def predict(prompt_text, model_path, num_tokens, decoder_type="baseline", target
 
 def append_csv_data(csv_rows, scenario_name, generated_output, metrics_dict):
     acceptance_rate = metrics_dict["accepted_tokens"] / max(1, metrics_dict["total_draft_tokens"])
-    rollback_rate = metrics_dict.get("rollback_count", 0) / max(1, metrics_dict["verification_rounds"])
+    # rollback_rate = metrics_dict.get("rollback_count", 0) / max(1, metrics_dict["verification_rounds"])
+    rollback_rate = metrics_dict.get("rollback_events", 0) / max(1, metrics_dict["verification_rounds"])
 
     csv_rows.append(
         [scenario_name, generated_output] +
@@ -55,7 +56,12 @@ def append_csv_data(csv_rows, scenario_name, generated_output, metrics_dict):
 PROMPT_TEXT = "The first digits of pi are "
 DRAFT_MODEL_PATH = "./models/tinyllama-1.1b"
 TARGET_MODEL_PATH = "./models/llama2-7b"
-N = 200
+# TARGET_MODEL_PATH = "./models/llama2-7b/models--meta-llama--Llama-2-7b-hf"
+N = 100
+print("N = ", N)
+
+
+
 
 print("Starting predictions on prompt:", PROMPT_TEXT)
 

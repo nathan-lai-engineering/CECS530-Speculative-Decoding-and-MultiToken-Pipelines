@@ -5,7 +5,7 @@ import argparse
 from datetime import datetime
 
 parser = argparse.ArgumentParser(description="Runs the experiment and generates a csv file")
-parser.add_argument("--n", help="the maximum output sequence length", default=50, type=int)
+parser.add_argument("--n", help="the maximum output sequence length", default=100, type=int)
 parser.add_argument("--prompt", help="the prompt to input into the model", default="The first digits of pi are ")
 parser.add_argument("--loops", help="how many times to repeat the experiemnt", default=1, type=int)
 parser.add_argument("--increment", help="how many times to loop the loops while incrementing n by double n", default=1, type=int)
@@ -25,7 +25,7 @@ from speculative_decoder import SpeculativeDecoder
 def predict(prompt, model_path, n, type="baseline", target_path=None, k=None, kv_cache=True, adaptive_k=True):
     if k is None:
         k = max(2, int(0.10 * n))
-
+        # k = 4
     match type:
         case "baseline":
             decoder = BaselineDecoder(model_path)

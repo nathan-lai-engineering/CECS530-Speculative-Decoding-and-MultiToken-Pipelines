@@ -168,6 +168,7 @@ class SpeculativeDecoder:
                     probs = torch.softmax(output.logits[:, -1, :], dim=-1)
 
                 token = torch.multinomial(probs, num_samples=1)
+                # token = torch.argmax(probs, dim=-1, keepdim=True)
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
                 draft_token_probs.append(probs.squeeze(0)[token.item()])
                 new_draft_ids.append(token.item())

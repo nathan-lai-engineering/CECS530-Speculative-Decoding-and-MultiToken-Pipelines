@@ -17,7 +17,8 @@ from src.speculative_decoder import SpeculativeDecoder
 # predict using either baseline or speculative method on given model
 def predict(prompt_text, model_path, num_tokens, decoder_type="baseline", target_model_path=None, draft_k=None, use_kv_cache=True, use_adaptive_k=True):
     if draft_k is None:
-        draft_k = max(2, int(0.10 * num_tokens))
+        # draft_k = max(2, int(0.10 * num_tokens))
+        draft_k = 4
 
     match decoder_type:
         case "pipeline":
@@ -27,7 +28,7 @@ def predict(prompt_text, model_path, num_tokens, decoder_type="baseline", target
                 draft_model_path=model_path,
                 target_model_path=resolved_target_path,
                 adaptive_k=use_adaptive_k,
-                buffer_capacity=2
+                buffer_capacity=4
             )
             generated_token_ids = pipeline_decoder.generate_k_tokens(prompt_text, n=num_tokens, k=draft_k)
             generated_text = pipeline_decoder.decode(generated_token_ids)
@@ -54,7 +55,7 @@ def append_csv_data(csv_rows, scenario_name, generated_output, metrics_dict):
 PROMPT_TEXT = "The first digits of pi are "
 DRAFT_MODEL_PATH = "./models/tinyllama-1.1b"
 TARGET_MODEL_PATH = "./models/llama2-7b"
-N = 50
+N = 200
 
 print("Starting predictions on prompt:", PROMPT_TEXT)
 

@@ -40,7 +40,7 @@ class MultiTokenPipeline:
             draft_model_path=draft_model_path,
             target_model_path=target_model_path,
             adaptive_k=adaptive_k,
-            kv_cache=False
+            kv_cache=True
         )
 
         self.draft_model = self.decoder.draft_model

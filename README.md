@@ -216,10 +216,10 @@ These columns appear in every output CSV.
 |---|---|---|
 | `tokens_per_second` | Output tokens produced per wall-clock second | `total_tokens / total_time` |
 | `total_tokens` | Number of output tokens generated (excludes prompt) | Incremented by 1 per accepted/emitted token |
-| `total_time` | Total wall-clock time for the generation loop | Sum of all forward-pass elapsed times (draft + target) |
+| `total_time` | Total wall-clock time for the generation loop | Sum of all forward-pass elapsed times (draft + target); for the pipeline script, equals `pipeline_total_time` (simulated parallel time, not the sequential sum) |
 | `mean_time_per_token` | Average wall time per output token | `total_time / total_tokens` |
-| `max_time_per_token` | Slowest single forward pass recorded | Running max of per-pass wall time |
-| `min_time_per_token` | Fastest single forward pass recorded | Running min of per-pass wall time |
+| `max_time_per_token` | Slowest single forward pass recorded | Running max over draft-pass wall times; for the pipeline script, `max(max_draft_time, max_target_time)` |
+| `min_time_per_token` | Fastest single forward pass recorded | Running min over draft-pass wall times; for the pipeline script, `min(min_draft_time, min_target_time)` |
 | `accepted_tokens` | Draft tokens accepted by the target model | Count of positions where `argmax(target_logit) == draft_token` |
 | `total_draft_tokens` | Total draft tokens generated before verification | Incremented by 1 for each token the draft model produces |
 | `verification_rounds` | Number of parallel target-model verification calls | Incremented by 1 per call to `parallel_verification` / `_verify_batch` |

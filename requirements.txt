@@ -9,3 +9,4 @@ numpy>=1.26.0
 tqdm>=4.66.0
 dotenv
 pytest
+psutil>=5.9.0

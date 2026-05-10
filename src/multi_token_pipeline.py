@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 import time
 import torch
+import psutil
+import os
 
 from src.speculative_decoder import SpeculativeDecoder
 
@@ -85,6 +87,10 @@ class MultiTokenPipeline:
         self.max_buffer_occupancy = 0
         self.batches_drafted = 0
         self.batches_verified = 0
+
+        # CPU RAM spill tracking
+        self.cpu_ram_delta_MB = 0.0
+        self.gpu_utilization_pct = 0.0
 
         # stage clocks
         self.draft_stage_free_at = 0.0
@@ -219,6 +225,9 @@ class MultiTokenPipeline:
         if self.device == "cuda":
             torch.cuda.reset_peak_memory_stats()
 
+        _process = psutil.Process(os.getpid())
+        _cpu_ram_before = _process.memory_info().rss
+
         while remaining > 0:
             # fill buffer
             while len(queue) < self.buffer_capacity and remaining > 0:
@@ -290,8 +299,12 @@ class MultiTokenPipeline:
             self.verify_stage_free_at
         )
 
+        self.cpu_ram_delta_MB = (_process.memory_info().rss - _cpu_ram_before) / 1e6
+
         if self.device == "cuda":
             self.peak_memory_MB = torch.cuda.max_memory_allocated() / 1e6
+            total_vram = torch.cuda.get_device_properties(0).total_memory
+            self.gpu_utilization_pct = (self.peak_memory_MB / (total_vram / 1e6)) * 100
 
         return committed_ids
 
@@ -331,4 +344,6 @@ class MultiTokenPipeline:
             "model_memory_MB": (self._draft_model_bytes + self._target_model_bytes) / 1e6,
             "memory_bandwidth_GB_per_s": (total_bytes / 1e9) / total_time if total_time > 0 else 0.0,
             "peak_memory_bandwidth_GB_per_s": self.peak_memory_bandwidth_GB_per_s,
+            "cpu_ram_delta_MB": self.cpu_ram_delta_MB,
+            "gpu_utilization_pct": self.gpu_utilization_pct,
         }

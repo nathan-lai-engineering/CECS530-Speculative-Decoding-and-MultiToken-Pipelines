@@ -74,10 +74,33 @@ Models are saved to `./models/` which is gitignored.
 Runs baseline (1.1B), baseline (7B), and four speculative decoding configurations across the same prompt. Results saved to `./results/`.
 
 ```bash
-python run_experiment.py
+python run_experiment.py [--n N] [--prompt PROMPT] [--loops LOOPS] [--increment INCREMENT]
 ```
 
-Scenarios run:
+| Argument | Default | Description |
+|---|---|---|
+| `--n` | `100` | Number of tokens to generate |
+| `--prompt` | `"The first digits of pi are "` | Input prompt |
+| `--loops` | `1` | Number of times to repeat the experiment at the current N |
+| `--increment` | `1` | Number of times to double N and repeat all loops |
+
+Examples:
+
+```bash
+# default run, n=100
+python run_experiment.py
+
+# 5 repetitions at n=200
+python run_experiment.py --n 200 --loops 5
+
+# n=50 → n=100 → n=200, 3 runs each
+python run_experiment.py --n 50 --loops 3 --increment 3
+
+# custom prompt
+python run_experiment.py --n 100 --prompt "Once upon a time"
+```
+
+Scenarios run per loop:
 - Llama2 1.1B baseline
 - Llama2 7B baseline
 - Speculative (no KV cache, no adaptive k)
@@ -87,13 +110,35 @@ Scenarios run:
 
 ### Multi-Token Pipeline Experiment
 
-Runs the multi-token pipeline architecture with and without adaptive k. Results saved to `./results/`.
+Runs the multi-token pipeline architecture with and without adaptive k. Results saved to `./results/`. Requires a CUDA GPU — will raise an error immediately if none is found.
 
 ```bash
-python multi_token_pipeline_experiment.py
+python multi_token_pipeline_experiment.py [--n N] [--prompt PROMPT] [--loops LOOPS] [--increment INCREMENT]
 ```
 
-Requires a CUDA GPU — will raise an error immediately if none is found.
+| Argument | Default | Description |
+|---|---|---|
+| `--n` | `50` | Number of tokens to generate |
+| `--prompt` | `"The first digits of pi are "` | Input prompt |
+| `--loops` | `5` | Number of times to repeat the experiment at the current N |
+| `--increment` | `1` | Number of times to double N and repeat all loops |
+
+Examples:
+
+```bash
+# default run, n=50, 5 loops
+python multi_token_pipeline_experiment.py
+
+# single run at n=200
+python multi_token_pipeline_experiment.py --n 200 --loops 1
+
+# n=50 → n=100 → n=200, 5 runs each
+python multi_token_pipeline_experiment.py --n 50 --loops 5 --increment 3
+```
+
+Scenarios run per loop:
+- Multi-Token Pipeline (fixed k)
+- Multi-Token Pipeline with Adaptive K
 
 ---
 
@@ -150,12 +195,58 @@ Requires a CUDA GPU — will raise an error immediately if none is found.
 
 ## Configuration
 
-Key parameters in each experiment file:
+Runtime parameters are passed as command-line arguments (see Running Experiments above). Internal parameters fixed in source:
 
-| Parameter | Description |
-|---|---|
-| `PROMPT` | Input prompt text |
-| `N` | Number of tokens to generate |
-| `k` | Speculation depth (defaults to 10% of N) |
-| `kv_cache` | Enable HuggingFace past_key_values for O(1) draft steps |
-| `adaptive_k` | Dynamically adjust k based on rolling acceptance rate |
+| Parameter | Location | Description |
+|---|---|---|
+| `k` | `predict()` in each script | Speculation depth — defaults to 10% of N, minimum 2 |
+| `kv_cache` | `run_experiment.py` | Enable HuggingFace `past_key_values` for O(1) draft steps |
+| `adaptive_k` | both scripts | Dynamically adjust k based on rolling acceptance rate |
+| `buffer_capacity` | `multi_token_pipeline_experiment.py` | Number of speculative batches held in the pipeline buffer |
+
+---
+
+## Output Metrics
+
+### Common metrics (both scripts)
+
+These columns appear in every output CSV.
+
+| Column | Definition | Calculation |
+|---|---|---|
+| `tokens_per_second` | Output tokens produced per wall-clock second | `total_tokens / total_time` |
+| `total_tokens` | Number of output tokens generated (excludes prompt) | Incremented by 1 per accepted/emitted token |
+| `total_time` | Total wall-clock time for the generation loop | Sum of all forward-pass elapsed times (draft + target) |
+| `mean_time_per_token` | Average wall time per output token | `total_time / total_tokens` |
+| `max_time_per_token` | Slowest single forward pass recorded | Running max of per-pass wall time |
+| `min_time_per_token` | Fastest single forward pass recorded | Running min of per-pass wall time |
+| `accepted_tokens` | Draft tokens accepted by the target model | Count of positions where `argmax(target_logit) == draft_token` |
+| `total_draft_tokens` | Total draft tokens generated before verification | Incremented by 1 for each token the draft model produces |
+| `verification_rounds` | Number of parallel target-model verification calls | Incremented by 1 per call to `parallel_verification` / `_verify_batch` |
+| `total_draft_time` | Cumulative wall time spent in draft forward passes | Sum of elapsed time for every draft model forward pass |
+| `total_target_time` | Cumulative wall time spent in target forward passes | Sum of elapsed time for every target model forward pass |
+| `peak_memory_MB` | Peak GPU memory allocated during generation | `torch.cuda.max_memory_allocated() / 1e6` after generation loop |
+| `model_memory_MB` | Static size of loaded model weights | `sum(p.numel() * p.element_size() for p in model.parameters()) / 1e6`; both draft and target summed for speculative runs |
+| `memory_bandwidth_GB_per_s` | Average memory bandwidth over the full run | `(model_bytes * num_passes / 1e9) / total_time`; assumes each forward pass reads all weights once |
+| `peak_memory_bandwidth_GB_per_s` | Highest per-pass bandwidth observed | `max(model_bytes / 1e9 / elapsed)` taken over every individual forward pass |
+
+### Pipeline-only metrics (multi_token_pipeline_experiment.py)
+
+These additional columns appear only in pipeline CSV output.
+
+| Column | Definition | Calculation |
+|---|---|---|
+| `pipeline_total_time` | Simulated total time assuming draft and verify run on separate hardware in parallel | `max(verify_end_timestamp)` across all batches, where each verify stage starts as soon as the batch is ready and the verify stage is free |
+| `draft_stage_busy_time` | Total time the draft stage was actively generating tokens | Sum of elapsed time for every `_draft_batch` call |
+| `verify_stage_busy_time` | Total time the verify stage was actively verifying batches | Sum of elapsed time for every `_verify_batch` call |
+| `pipeline_bubbles` | Number of times the verify stage had to wait because no batch was ready | Incremented when `batch.ready_time > verify_stage_free_at` (verify idle waiting for draft), and when the queue is empty |
+| `rollback_events` | Number of verification rounds that produced a token mismatch | Incremented once per `_verify_batch` call that returns `mismatch=True` |
+| `flushed_batches` | Total speculative batches discarded due to rollbacks | Sum of `len(queue)` at the moment of each rollback flush |
+| `max_buffer_occupancy` | Largest number of unverified batches in the queue at any point | Running max of `len(queue)` after each `_draft_batch` |
+| `buffer_capacity` | Configured maximum queue depth | Set at construction (`buffer_capacity` argument), held constant |
+| `batches_drafted` | Total number of draft batches produced | Incremented by 1 in every `_draft_batch` call |
+| `batches_verified` | Total number of batches sent to the target for verification | Incremented by 1 in every `_verify_batch` call |
+| `cpu_ram_delta_MB` | Increase in process RSS memory during generation | `(psutil.Process().memory_info().rss_after - rss_before) / 1e6`; positive values indicate tensors were moved to system RAM |
+| `gpu_utilization_pct` | Peak GPU memory as a percentage of total device VRAM | `peak_memory_MB / (torch.cuda.get_device_properties(0).total_memory / 1e6) * 100` |
+| `acceptance_rate` | Fraction of draft tokens accepted by the target | `accepted_tokens / total_draft_tokens` |
+| `rollback_rate` | Fraction of verification rounds that triggered a rollback | `rollback_events / verification_rounds` |

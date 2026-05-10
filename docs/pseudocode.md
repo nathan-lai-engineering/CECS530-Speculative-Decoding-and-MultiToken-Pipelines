@@ -24,11 +24,10 @@ WHILE n > 0 DO:
         IF target_probs[i] >= draft_probs[i] THEN:
             APPEND(accepted_tokens, draft_tokens[i])
         ELSE:
-	    // Enable rollback on mismatch
+	        // Enable rollback on mismatch
             correct_token <- sample(max(0, target_probs[i]- draft_probs[i] // Sample corrected token
             APPEND(accepted_tokens, correct_token)
             CLEAR(draft_tokens) // Discard all remaining draft tokens
-
             BREAK                              
         END IF
     END FOR
@@ -40,7 +39,6 @@ WHILE n > 0 DO:
     END FOR
      
     CLEAR(accepted_tokens)
-
 END WHILE
 RETURN p
 ```

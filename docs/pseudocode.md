@@ -1,33 +1,46 @@
 ```
-INPUT: prompt, draft_model, target_model, K (number of draft tokens), current_n
+INPUT: Prompt p, Draft model draft_model, Target model target_model, Speculation Depth k >= 2, Total Tokens n
+OUTPUT: Prompt p with k accepted tokens
 
-REPEAT until current_n EQUALS 0:
-    draft_tokens = []
-    draft_probs = []
-    accepted_tokens = []
+WHILE n > 0 DO:
+    draft_tokens <- []
+    draft_probs <- []
+    accepted_tokens <- []
+   
+    k <- MIN(k, n)
     
-    FOR i = 1 to K:
-        p_draft = draft_model(prompt + draft_tokens)   
-        token = sample(p_draft)                  
-        draft_tokens.append(token)
-        draft_probs.append(p_draft)
+    // Generate draft tokens
+    FOR i = 1 TO k DO:
+        d_p <- draft_model(p + draft_tokens)   
+        draft_token <- sample(d_p)
+	APPEND(draft_tokens, draft_token)
+	APPEND(draft_probs, d_p)                  
+    END FOR
         
-    target_probs = target_model(prompt + draft_tokens)
+    target_probs <- target_model(prompt + draft_tokens)
     
-    FOR i = 0 to K - 1:
-        # Verify each draft token
-        p_target = target_probs[i]
-        p_draft  = draft_probs[i]
-
-        IF p_target >= p_draft:
-            accepted_tokens.append(draft_tokens[i])
-            current_n -= 1
-
+    // Perform verification
+    FOR i = 0 TO k - 1 DO:
+        IF target_probs[i] >= draft_probs[i] THEN:
+            APPEND(accepted_tokens, draft_tokens[i])
         ELSE:
-            new_token = sample(max(0, p_target - p_draft))
-            accepted_tokens.append(new_token)
-            BREAK                              
+	    // Enable rollback on mismatch
+            correct_token <- sample(max(0, target_probs[i]- draft_probs[i] // Sample corrected token
+            APPEND(accepted_tokens, correct_token)
+            CLEAR(draft_tokens) // Discard all remaining draft tokens
 
-    FOR i = 0 to LENGTH(accepted_tokens) - 1:
-        prompt = prompt + accepted_tokens[i]
+            BREAK                              
+        END IF
+    END FOR
+   
+    n <- n - LENGTH(accepted_tokens) // Update remaining amount of tokens to be generated
+
+    FOR i = 0 TO LENGTH(accepted_tokens) - 1 DO:
+        p <- p + accepted_tokens[i]
+    END FOR
+     
+    CLEAR(accepted_tokens)
+
+END WHILE
+RETURN p
 ```

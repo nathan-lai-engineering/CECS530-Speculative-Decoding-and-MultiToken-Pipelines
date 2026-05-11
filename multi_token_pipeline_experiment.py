@@ -133,12 +133,4 @@ for i in range(INCREMENT_LOOPS):
             csv_writer = csv.writer(csv_file)
             csv_writer.writerows(csv_rows)
 
-        print(scenario_name_1)
-        print(generated_output_1)
-        print(metrics_1)
-
-        print(scenario_name_2)
-        print(generated_output_2)
-        print(metrics_2)
-
     N *= 2

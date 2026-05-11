@@ -20,7 +20,25 @@ Implementation and analysis of speculative decoding using TinyLlama-1.1B as the 
 
 ## Installation
 
-### 1. Install dependencies
+### 1. Create and activate a virtual environment
+
+```bash
+python -m venv venv
+```
+
+On Windows:
+
+```bash
+venv\Scripts\activate
+```
+
+On macOS/Linux:
+
+```bash
+source venv/bin/activate
+```
+
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -33,7 +51,7 @@ For PyTorch with CUDA, install separately matching your CUDA version:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 ```
 
-### 2. Set up HuggingFace token
+### 3. Set up HuggingFace token
 
 Llama-2 requires a HuggingFace account with access granted at [meta-llama/Llama-2-7b-hf](https://huggingface.co/meta-llama/Llama-2-7b-hf).
 
@@ -45,7 +63,7 @@ HF_TOKEN="hf_your_token_here"
 
 Get your token from huggingface.co/settings/tokens. The `.env` file is gitignored and will not be committed since that's a secret key
 
-### 3. Download models
+### 4. Download models
 
 Edit `scripts/install_llama2.py` to uncomment the models you want to download, then run:
 
@@ -139,6 +157,22 @@ python multi_token_pipeline_experiment.py --n 50 --loops 5 --increment 3
 Scenarios run per loop:
 - Multi-Token Pipeline (fixed k)
 - Multi-Token Pipeline with Adaptive K
+
+### Analytical Performance Model (optional)
+
+After running experiments, you can compute the theoretical speedup model from the sequential baseline results:
+
+```bash
+python scripts/performance_model.py
+```
+
+Reads `results/sequential/new data/sequential combined.csv` automatically. Outputs:
+
+- Empirical beta (T_draft / T_target) per N and overall
+- Speedup table across acceptance rates (alpha) and speculation depths (k)
+- Optimal k for each acceptance rate
+- Diminishing returns analysis at alpha=0.6
+- Speedup vs sequence length N
 
 ---
 

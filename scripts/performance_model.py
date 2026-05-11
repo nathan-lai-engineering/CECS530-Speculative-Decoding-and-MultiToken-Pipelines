@@ -1,4 +1,40 @@
+import csv
+import os
+from collections import defaultdict
 import numpy as np
+
+DRAFT_BASELINE = "Llama2 1.1b - Baseline"
+TARGET_BASELINE = "Llama2 7b - Baseline"
+
+def load_beta_from_csv(csv_path):
+    """
+    Computes beta (T_draft / T_target) per N from sequential baseline rows.
+    Uses mean_time_per_token averaged across all runs for each N.
+    Returns (beta_overall, {N: beta_n}).
+    """
+    draft_times = defaultdict(list)
+    target_times = defaultdict(list)
+
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            scenario = row["Scenario"]
+            n = int(row["N"])
+            mttp = float(row["mean_time_per_token"])
+            if scenario == DRAFT_BASELINE:
+                draft_times[n].append(mttp)
+            elif scenario == TARGET_BASELINE:
+                target_times[n].append(mttp)
+
+    beta_per_n = {}
+    for n in sorted(draft_times):
+        if n in target_times:
+            avg_draft = float(np.mean(draft_times[n]))
+            avg_target = float(np.mean(target_times[n]))
+            beta_per_n[n] = avg_draft / avg_target
+
+    beta_overall = float(np.mean(list(beta_per_n.values())))
+    return beta_overall, beta_per_n
 
 def expected_output_tokens(alpha, k):
     """
@@ -85,25 +121,22 @@ def speedup_vs_n(alpha, k, beta, ns):
 
 
 if __name__ == "__main__":
-    # --- Parameters from your empirical runs ---
-    # beta = T_draft / T_target ≈ 0.035 / 0.131 ≈ 0.267
-    '''
-    k: speculation depth
-    alpha: acceptance rate
-    beta: T_draft / T_target (cost ratio)
-    '''
-
-    # average time per token from baseline models
-    # avg across 5 samples across k=50,k=100,k=200
-    beta = 0.041 / 0.153
-
-    beta50 = 0.044 / 0.132
-    beta100 = 0.039 / 0.153
-    beta200 = 0.039 / 0.205
+    csv_path = os.path.join(
+        os.path.dirname(__file__), "..", "results", "sequential", "new data", "sequential combined.csv"
+    )
+    beta, beta_per_n = load_beta_from_csv(csv_path)
 
     print("=" * 60)
+    print("BETA FROM EMPIRICAL BASELINE DATA")
+    print("  beta = mean_time_per_token(draft) / mean_time_per_token(target)")
+    print("=" * 60)
+    for n, b in beta_per_n.items():
+        print(f"  N={n:>4}  beta={b:.4f}")
+    print(f"  Overall beta (mean across N) = {beta:.4f}")
+
+    print("\n" + "=" * 60)
     print("Speculative Speedup: k vs alpha")
-    print(f"beta (T_draft/T_target) from baseline models = {beta:.3f}")
+    print(f"beta (T_draft/T_target) = {beta:.4f}")
     print("Result is speedup ratio of speculative decoding vs target model")
     print("=" * 60)
     alphas = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -115,7 +148,7 @@ if __name__ == "__main__":
     print("=" * 60)
     for alpha in alphas:
         k_opt, s_opt = optimal_k(alpha, beta)
-        print(f"  alpha={alpha:.1f}  →  optimal k={k_opt}  (speedup={s_opt:.3f}x)")
+        print(f"  alpha={alpha:.1f}  ->  optimal k={k_opt}  (speedup={s_opt:.3f}x)")
 
     diminishing_returns(alpha=0.6, beta=beta)
 
@@ -123,7 +156,7 @@ if __name__ == "__main__":
     print("SPEEDUP VS SEQUENCE LENGTH N")
     print("(alpha=0.6, k=5, empirical beta per N)")
     print("=" * 60)
-    empirical_betas = [(50, beta50), (100, beta100), (200, beta200)]
+    empirical_betas = sorted(beta_per_n.items())
     print(f"{'N':>6}  {'beta':>8}  {'Speedup':>10}")
     print("-" * 30)
     for n, b in empirical_betas:

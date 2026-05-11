@@ -147,8 +147,7 @@ class MultiTokenPipeline:
 
     def _verify_batch(self, batch):
         """
-        Verify one batch.
-        IMPORTANT: no bonus-token optimization here.
+        Verifies one batch.
         """
         with torch.inference_mode():
             wall_start = time.time()
@@ -181,8 +180,6 @@ class MultiTokenPipeline:
             # full draft accepted, claim one bonus target token
             bonus_token = logits[0][prompt_len - 1 + accepted_count].argmax().unsqueeze(0)
             result = torch.cat([result[0], bonus_token], dim=-1).unsqueeze(0)
-
-
 
         emitted_count = result.shape[-1] - prompt_len
 
@@ -267,13 +264,6 @@ class MultiTokenPipeline:
 
             self.window_accepted += accepted_count
             self.window_drafts += max(1, oldest.draft_count)
-
-            # if self.adaptive_k and self.window_drafts >= 10:
-            #     rate = self.window_accepted / self.window_drafts
-            #     optimal_k = int(1 / (1 - rate + 0.01))
-            #     current_k = max(k, min(k * 2, optimal_k))
-            #     self.window_accepted = 0
-            #     self.window_drafts = 0
 
             if self.adaptive_k and self.window_drafts >= 10:
                 rate = self.window_accepted / max(1, self.window_drafts)

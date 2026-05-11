@@ -4,17 +4,10 @@ from tqdm import tqdm, trange
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# maintained by nathan feel free to edit
-# baseline decoder to do full forward pass for a token
 class BaselineDecoder:
-
     def __init__(self, model_path):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # so you can choose big model or small model
         self.model_path = model_path 
-
-        # load model
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -22,9 +15,6 @@ class BaselineDecoder:
         ).to(self.device)
         self.model.eval()
         self._model_bytes = sum(p.numel() * p.element_size() for p in self.model.parameters())
-
-
-
 
     # generate k tokens with k forward passes
     # returns input tokens + k number of output tokens
@@ -84,7 +74,6 @@ class BaselineDecoder:
         next_token_id = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
         return next_token_id
 
-    # the metrics to look at
     def token_throughput(self):
         if hasattr(self, "total_tokens") and hasattr(self, "total_time"):
             total_bytes = self._model_bytes * self.total_tokens
@@ -106,7 +95,6 @@ class BaselineDecoder:
                 "peak_memory_bandwidth_GB_per_s": getattr(self, "peak_memory_bandwidth_GB_per_s", 0.0),
             }
         else:
-            print("no generations ran yet, so no throughput really")
             return {
                 "tokens_per_second": 0,
                 "total_tokens": 0,

@@ -105,17 +105,11 @@ class SpeculativeDecoder:
             if self.use_kv_cache:
                 self.draft_past_kv = self.trim_cache(draft_kv, current_ids.shape[-1] + accepted_this_round)
 
-
             # Update prompt and remaining n
             current_n -= verified_tokens.shape[-1] - current_ids.shape[-1]
-            #print(current_n)
             current_ids = verified_tokens
 
-
-
-            # adaptive speculative depth, increase draft tokens as we increase confidence
-            # we use a sliding window so that "confidence" is only based on recent rounds
-            # what used to happen was that early rounds decimated k and stayed there and took too long to grow back up
+            # Use sliding window to adapt confidence based on recent rounds
             if self.adaptive_k:
                 self.window_accepted += accepted_this_round
                 self.window_drafts += len(draft_probs)
@@ -168,7 +162,6 @@ class SpeculativeDecoder:
                     probs = torch.softmax(output.logits[:, -1, :], dim=-1)
 
                 token = torch.multinomial(probs, num_samples=1)
-                # token = torch.argmax(probs, dim=-1, keepdim=True)
                 draft_tokens = torch.cat([draft_tokens, token], dim=-1)
                 draft_token_probs.append(probs.squeeze(0)[token.item()])
                 new_draft_ids.append(token.item())
@@ -198,7 +191,6 @@ class SpeculativeDecoder:
         k = len(draft_token_probs)
         self.verification_rounds += 1
 
-        #print("Verifying", k, "draft tokens")
         with torch.inference_mode():
             start_time = time.time()
 
@@ -206,7 +198,7 @@ class SpeculativeDecoder:
             output = self.target_model(draft_tokens)
 
             # Generate probabilities from target model
-            target_token_probs = output.logits  # use logits directly, argmax is identical
+            target_token_probs = output.logits
 
             elapsed_time = time.time() - start_time
             self.total_target_time += elapsed_time
@@ -235,7 +227,7 @@ class SpeculativeDecoder:
 
                 result = draft_tokens[:, :prompt_len + accepted_count]
 
-                # there is a rejection, we did not accept full depth
+                # there is a rejection, do not accept full depth
                 if accepted_count < k:
                     reject_pos = -(k - accepted_count + 1)
                     correct_token = target_token_probs[0][reject_pos].argmax().unsqueeze(0)
@@ -246,7 +238,7 @@ class SpeculativeDecoder:
                     if eos_id is not None and correct_token.item() == eos_id:
                         return result
                     
-                # we accepted full depth and we can claim a bonus token
+                # Accept full depth and claim a bonus token
                 else:
                     bonus = target_token_probs[0][-1].argmax().unsqueeze(0)
                     result = torch.cat([result[0], bonus], dim=-1).unsqueeze(0)

@@ -3,6 +3,7 @@ import os
 from collections import defaultdict
 import numpy as np
 
+# Scenario name strings as they appear in the sequential combined CSV
 DRAFT_BASELINE = "Llama2 1.1b - Baseline"
 TARGET_BASELINE = "Llama2 7b - Baseline"
 
@@ -33,20 +34,26 @@ def load_beta_from_csv(csv_path):
             avg_target = float(np.mean(target_times[n]))
             beta_per_n[n] = avg_draft / avg_target
 
+    # Mean beta across all N values
     beta_overall = float(np.mean(list(beta_per_n.values())))
     return beta_overall, beta_per_n
 
 def expected_output_tokens(alpha, k):
     """
+    Expected number of tokens produced per speculative round.
+    Derived from the geometric series over the acceptance distribution.
     alpha: acceptance rate
     k: speculation depth
     """
     if alpha >= 1.0:
-        return k + 1 # bonus token
+        return k + 1  # all k drafts accepted plus the bonus target token
     return (1 - alpha ** (k + 1)) / (1 - alpha)
 
 def speedup(alpha, k, beta):
     """
+    Theoretical speedup of speculative decoding over autoregressive target decoding.
+    Numerator: expected output tokens per round.
+    Denominator: expected wall time per round normalized to one target step.
     alpha: acceptance rate
     k: speculation depth
     beta: T_draft / T_target (cost ratio)
@@ -54,10 +61,11 @@ def speedup(alpha, k, beta):
     return expected_output_tokens(alpha, k) / ((1 - alpha) * (k * beta + 1))
 
 def optimal_k(alpha, beta, k_max=20):
-    '''
+    """
+    Grid search over k in [1, k_max] to find the depth that maximizes speedup.
     alpha: acceptance rate
     beta: T_draft / T_target (cost ratio)
-    '''
+    """
     best_k, best_s = 1, 0
     for k in range(1, k_max + 1):
         s = speedup(alpha, k, beta)
@@ -66,6 +74,7 @@ def optimal_k(alpha, beta, k_max=20):
     return best_k, best_s
 
 def speedup_table(alphas, ks, beta):
+    # Print a 2-D grid of speedup values: rows = alpha, columns = k
     header = f"{'alpha/k':>10}" + "".join(f"  k={k:2d}" for k in ks)
     print(header)
     print("-" * len(header))
@@ -74,6 +83,7 @@ def speedup_table(alphas, ks, beta):
         print(row)
 
 def diminishing_returns(alpha, beta, k_max=20):
+    # Show marginal speedup gain for each additional draft token at fixed alpha
     print(f"\nDiminishing returns (alpha={alpha}, beta={beta:.3f}):")
     print(f"{'k':>4}  {'Speedup':>8}  {'Marginal gain':>14}")
     prev = 0
@@ -92,18 +102,18 @@ def validate_against_empirical(empirical_results):
     print(f"\n{'Label':<35} {'T.Speedup':>10} {'E.Speedup':>10} {'alpha':>7} {'k_eff':>6}")
     print("-" * 72)
 
-    # baseline 7b is the reference — pass it separately
+    # First entry must be the 7B baseline — all speedups are relative to it
     baseline_tps = empirical_results[0]["tokens_per_second"]
 
     for r in empirical_results[1:]:
         alpha = r["acceptance_rate"]
         output = r["output_tokens"]
         drafts = r["total_draft_tokens"]
-        k_eff = drafts / max(1, output)  # effective average k per output token
+        k_eff = drafts / max(1, output)  # average draft tokens produced per output token
 
         t_draft = r.get("total_draft_time", 0)
         t_target = r.get("total_target_time", 0)
-        rounds = output - r.get("accepted_tokens", 0)  # approx rounds
+        rounds = output - r.get("accepted_tokens", 0)  # approximate number of verification rounds
         beta = (t_draft / max(1, drafts)) / (t_target / max(1, rounds))
 
         t_speedup = speedup(alpha, round(k_eff), beta)
@@ -112,11 +122,13 @@ def validate_against_empirical(empirical_results):
         print(f"{r['label']:<35} {t_speedup:>10.3f} {e_speedup:>10.3f} {alpha:>7.3f} {k_eff:>6.1f}")
 
 def beta_at_n(n, beta, target_uses_kv=False, draft_uses_kv=True):
-    target_scale = n  # O(n) attention cost growth (simplified)
+    # Scale beta by relative attention cost: target grows O(n), draft is O(1) with KV cache
+    target_scale = n
     draft_scale = 1 if draft_uses_kv else n
     return beta * (draft_scale / target_scale)
 
 def speedup_vs_n(alpha, k, beta, ns):
+    # Return (n, speedup) pairs showing how speedup changes with sequence length
     return [(n, speedup(alpha, k, beta_at_n(n, beta))) for n in ns]
 
 
